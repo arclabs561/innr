@@ -137,8 +137,7 @@ pub mod x86_64 {
     #[target_feature(enable = "avx512f")]
     pub unsafe fn fast_cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::x86_64::{
-            __m512, _mm512_add_ps, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_mul_ps,
-            _mm512_reduce_add_ps, _mm512_rsqrt14_ps, _mm512_set1_ps, _mm512_setzero_ps,
+            __m512, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_reduce_add_ps, _mm512_setzero_ps,
         };
 
         let n = a.len().min(b.len());

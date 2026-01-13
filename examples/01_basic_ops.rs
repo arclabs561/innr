@@ -2,6 +2,24 @@
 //!
 //! The minimal example: dot, cosine, L2.
 //!
+//! # Metric Selection Guide
+//!
+//! | Metric     | Range      | Use Case                           |
+//! |------------|------------|------------------------------------|
+//! | Dot        | (-inf,inf) | Unnormalized similarity, MaxSim    |
+//! | Cosine     | [-1, 1]    | Direction similarity (normalized)  |
+//! | L2         | [0, inf)   | Euclidean distance, cluster radius |
+//! | L2^2       | [0, inf)   | Comparison-only (avoids sqrt)      |
+//!
+//! # Key Identity (for normalized vectors)
+//!
+//! ```text
+//! L2^2(a, b) = 2 * (1 - cosine(a, b))
+//! ```
+//!
+//! This means cosine similarity and L2 distance are equivalent for
+//! normalized vectors - they rank results identically.
+//!
 //! ```bash
 //! cargo run --example 01_basic_ops --release
 //! ```

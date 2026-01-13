@@ -206,8 +206,7 @@ pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
     let mut distances = vec![0.0f32; batch.num_vectors];
 
     // Process dimension-by-dimension (the key insight)
-    for d in 0..batch.dimension {
-        let q_d = query[d];
+    for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
         let dim_slice = batch.dimension_slice(d);
 
         // This loop auto-vectorizes cleanly
@@ -226,8 +225,7 @@ pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
 
     let mut products = vec![0.0f32; batch.num_vectors];
 
-    for d in 0..batch.dimension {
-        let q_d = query[d];
+    for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
         let dim_slice = batch.dimension_slice(d);
 
         for (prod, &v_d) in products.iter_mut().zip(dim_slice.iter()) {
@@ -270,25 +268,28 @@ pub fn batch_l2_squared_pruning(
     let mut num_alive = batch.num_vectors;
 
     // Process dimension-by-dimension with pruning
-    for d in 0..batch.dimension {
+    for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
         if num_alive == 0 {
             break;
         }
 
-        let q_d = query[d];
         let dim_slice = batch.dimension_slice(d);
 
-        for i in 0..batch.num_vectors {
-            if !alive[i] {
+        for (i, (&v_d, (dist, is_alive))) in dim_slice
+            .iter()
+            .zip(distances.iter_mut().zip(alive.iter_mut()))
+            .enumerate()
+        {
+            if !*is_alive {
                 continue;
             }
 
-            let diff = q_d - dim_slice[i];
-            distances[i] += diff * diff;
+            let diff = q_d - v_d;
+            *dist += diff * diff;
 
             // Prune if exceeded threshold
-            if distances[i] > threshold {
-                alive[i] = false;
+            if *dist > threshold {
+                *is_alive = false;
                 num_alive -= 1;
             }
         }
@@ -373,8 +374,7 @@ pub fn batch_knn_adaptive(
     let mut alive: Vec<bool> = vec![true; batch.num_vectors];
 
     // Phase 1: Warmup - process first dimensions fully
-    for d in 0..warmup_dims {
-        let q_d = query[d];
+    for (d, &q_d) in query.iter().enumerate().take(warmup_dims) {
         let dim_slice = batch.dimension_slice(d);
 
         for (dist, &v_d) in distances.iter_mut().zip(dim_slice.iter()) {

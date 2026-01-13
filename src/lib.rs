@@ -61,6 +61,9 @@
 mod arch;
 mod dense;
 
+/// Batch vector operations with columnar (PDX-style) layout.
+pub mod batch;
+
 #[cfg(feature = "sparse")]
 mod sparse;
 

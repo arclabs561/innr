@@ -38,3 +38,11 @@ required-features = ["sparse"]
 name = "maxsim"
 harness = false
 required-features = ["maxsim"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1

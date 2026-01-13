@@ -275,10 +275,9 @@ pub fn batch_l2_squared_pruning(
 
         let dim_slice = batch.dimension_slice(d);
 
-        for (i, (&v_d, (dist, is_alive))) in dim_slice
+        for (&v_d, (dist, is_alive)) in dim_slice
             .iter()
             .zip(distances.iter_mut().zip(alive.iter_mut()))
-            .enumerate()
         {
             if !*is_alive {
                 continue;
@@ -403,21 +402,24 @@ pub fn batch_knn_adaptive(
     }
 
     // Phase 2: Process remaining dimensions with pruning
-    for d in warmup_dims..batch.dimension {
-        let q_d = query[d];
+    for (d, &q_d) in query.iter().enumerate().skip(warmup_dims).take(batch.dimension - warmup_dims) {
         let dim_slice = batch.dimension_slice(d);
 
-        for i in 0..batch.num_vectors {
-            if !alive[i] {
+        for ((&v_d, dist), is_alive) in dim_slice
+            .iter()
+            .zip(distances.iter_mut())
+            .zip(alive.iter_mut())
+        {
+            if !*is_alive {
                 continue;
             }
 
-            let diff = q_d - dim_slice[i];
-            distances[i] += diff * diff;
+            let diff = q_d - v_d;
+            *dist += diff * diff;
 
             // Prune if definitely beyond k-th best
-            if distances[i] > threshold {
-                alive[i] = false;
+            if *dist > threshold {
+                *is_alive = false;
             }
         }
 
@@ -425,9 +427,9 @@ pub fn batch_knn_adaptive(
         if d % 32 == 0 {
             let mut current_best: Vec<f32> = alive
                 .iter()
-                .enumerate()
-                .filter(|(_, &a)| a)
-                .map(|(i, _)| distances[i])
+                .zip(distances.iter())
+                .filter(|(&a, _)| a)
+                .map(|(_, &d)| d)
                 .collect();
 
             if current_best.len() >= k {

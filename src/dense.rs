@@ -14,7 +14,11 @@
 //! | Portable | any | 1x (baseline) |
 
 use crate::arch;
-use crate::{MIN_DIM_SIMD, NORM_EPSILON};
+use crate::NORM_EPSILON;
+
+// MIN_DIM_SIMD is only used on architectures with SIMD dispatch
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::MIN_DIM_SIMD;
 
 /// Minimum dimension for AVX-512 (64 floats = one unrolled iteration).
 #[cfg(target_arch = "x86_64")]
@@ -56,6 +60,8 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
         a.len(),
         b.len()
     );
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
 
     #[cfg(target_arch = "x86_64")]

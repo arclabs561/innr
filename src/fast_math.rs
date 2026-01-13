@@ -23,7 +23,11 @@
 //! - SimSIMD (Vardanian 2023): demonstrates 3-10x speedups with rsqrt+NR
 //! - Quake III "fast inverse square root" (Lomont 2003): classic integer bit-hack analysis
 
-use crate::{MIN_DIM_SIMD, NORM_EPSILON};
+use crate::NORM_EPSILON;
+
+// MIN_DIM_SIMD is only used on architectures with SIMD dispatch
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::MIN_DIM_SIMD;
 
 /// Fast scalar inverse square root using the classic Quake III bit-hack.
 ///
@@ -317,6 +321,7 @@ pub mod aarch64 {
 /// Dispatch to fastest available fast_cosine implementation.
 #[inline]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
 
     #[cfg(target_arch = "x86_64")]

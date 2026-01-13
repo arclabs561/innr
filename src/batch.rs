@@ -152,6 +152,16 @@ impl VerticalBatch {
         self.data[dim * self.num_vectors + vec_idx]
     }
 
+    /// Get value at (dimension, vector_index) without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure `dim < self.dimension` and `vec_idx < self.num_vectors`.
+    #[inline]
+    pub unsafe fn get_unchecked(&self, dim: usize, vec_idx: usize) -> f32 {
+        *self.data.get_unchecked(dim * self.num_vectors + vec_idx)
+    }
+
     /// Get slice for a single dimension across all vectors.
     #[inline]
     pub fn dimension_slice(&self, dim: usize) -> &[f32] {

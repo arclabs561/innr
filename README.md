@@ -48,3 +48,33 @@ Vectors < 16 dimensions use portable code.
 - `sparse` — sparse vector operations
 - `maxsim` — ColBERT late interaction scoring
 - `full` — all features
+
+## Performance
+
+For maximum performance, build with native CPU features:
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release
+```
+
+Or specify a portable baseline with SIMD:
+
+```bash
+# AVX2 (89% of x86_64 CPUs)
+RUSTFLAGS="-C target-cpu=x86-64-v3" cargo build --release
+
+# SSE2 only (100% compatible)
+RUSTFLAGS="-C target-cpu=x86-64" cargo build --release
+```
+
+Run benchmarks:
+
+```bash
+cargo bench
+```
+
+Generate flamegraphs (requires `cargo-flamegraph`):
+
+```bash
+./scripts/profile.sh dense
+```

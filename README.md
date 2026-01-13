@@ -2,9 +2,9 @@
 
 ```mermaid
 flowchart LR
-    A["[1.0, 0.0, 0.0, 0.0]"] --> SIMD
-    B["[0.7, 0.7, 0.0, 0.0]"] --> SIMD
-    SIMD["SIMD dot"] --> R["0.7"]
+    A["a: [f32]"] --> DOT["dot()"]
+    B["b: [f32]"] --> DOT
+    DOT --> R["f32"]
 ```
 
 SIMD-accelerated vector similarity primitives.
@@ -30,17 +30,18 @@ let n = norm(&a);         // 1.0
 | `norm` | L2 norm |
 | `cosine` | Cosine similarity |
 | `l2_distance` | Euclidean distance |
-| `sparse_dot` | Sparse vector dot (feature `sparse`) |
-| `maxsim` | ColBERT late interaction (feature `maxsim`) |
+| `sparse_dot` | Sparse vector dot (`sparse` feature) |
+| `maxsim` | ColBERT late interaction (`maxsim` feature) |
 
 ## SIMD Dispatch
 
 | Architecture | Instructions | Detection |
 |--------------|--------------|-----------|
-| x86_64 | AVX-512 | Runtime |
-| x86_64 | AVX2+FMA | Runtime |
+| x86_64 | AVX2 + FMA | Runtime |
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
+
+Vectors < 16 dimensions use portable code.
 
 ## Features
 

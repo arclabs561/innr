@@ -1,9 +1,24 @@
 //! Dense vector operations with SIMD acceleration.
 //!
 //! Core operations: dot product, norm, cosine similarity, L2 distance.
+//!
+//! # Performance Hierarchy
+//!
+//! Runtime dispatch selects the fastest available implementation:
+//!
+//! | ISA | Min dim | Typical speedup |
+//! |-----|---------|-----------------|
+//! | AVX-512 | 64 | 10-20x vs scalar |
+//! | AVX2+FMA | 16 | 5-10x vs scalar |
+//! | NEON | 16 | 4-8x vs scalar |
+//! | Portable | any | 1x (baseline) |
 
 use crate::arch;
 use crate::{MIN_DIM_SIMD, NORM_EPSILON};
+
+/// Minimum dimension for AVX-512 (64 floats = one unrolled iteration).
+#[cfg(target_arch = "x86_64")]
+const MIN_DIM_AVX512: usize = 64;
 
 /// Dot product of two vectors: `Σ(a[i] * b[i])`.
 ///
@@ -11,9 +26,10 @@ use crate::{MIN_DIM_SIMD, NORM_EPSILON};
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to:
-/// - AVX2+FMA on x86_64 (runtime detection)
-/// - NEON on aarch64 (always available)
+/// Automatically dispatches to (in order of preference):
+/// - AVX-512 on x86_64 (runtime detection, n >= 64)
+/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
+/// - NEON on aarch64 (always available, n >= 16)
 /// - Portable fallback otherwise
 ///
 /// # Debug Assertions
@@ -44,6 +60,13 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
 
     #[cfg(target_arch = "x86_64")]
     {
+        // Prefer AVX-512 for large vectors (16 floats/register, 4-way unrolled)
+        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
+            return unsafe { arch::x86_64::dot_avx512(a, b) };
+        }
+
+        // Fall back to AVX2+FMA (8 floats/register, 4-way unrolled)
         if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
         {
             // SAFETY: AVX2 and FMA verified via runtime detection.

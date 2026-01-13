@@ -40,6 +40,14 @@ name = "maxsim"
 harness = false
 required-features = ["maxsim"]
 
+[[bench]]
+name = "fast_math"
+harness = false
+
+[[bench]]
+name = "ternary"
+harness = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

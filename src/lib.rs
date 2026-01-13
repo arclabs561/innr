@@ -61,6 +61,9 @@
 mod arch;
 mod dense;
 
+/// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
+pub mod fast_math;
+
 /// Batch vector operations with columnar (PDX-style) layout.
 pub mod batch;
 
@@ -72,6 +75,12 @@ mod maxsim;
 
 // Re-export core operations
 pub use dense::{cosine, dot, dot_portable, l2_distance, l2_distance_squared, norm};
+
+// Re-export fast math (rsqrt-based approximations)
+pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
+
+/// Ternary quantization (1.58-bit) for ultra-compressed embeddings.
+pub mod ternary;
 
 #[cfg(feature = "sparse")]
 pub use sparse::{sparse_dot, sparse_dot_portable};

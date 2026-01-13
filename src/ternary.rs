@@ -231,8 +231,8 @@ unsafe fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
         let same = (pos_a & pos_b) | (neg_a & neg_b);
         let diff = (pos_a & neg_b) | (neg_a & pos_b);
 
-        same_count += _popcnt64(same as i64);
-        diff_count += _popcnt64(diff as i64);
+        same_count += i64::from(_popcnt64(same as i64));
+        diff_count += i64::from(_popcnt64(diff as i64));
     }
 
     (same_count - diff_count) as i32

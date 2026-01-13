@@ -355,10 +355,7 @@ mod batch_props {
         dim: usize,
     ) -> impl Strategy<Value = (Vec<Vec<f32>>, Vec<f32>)> {
         (
-            proptest::collection::vec(
-                proptest::collection::vec(-10.0f32..10.0, dim),
-                num_vectors,
-            ),
+            proptest::collection::vec(proptest::collection::vec(-10.0f32..10.0, dim), num_vectors),
             proptest::collection::vec(-10.0f32..10.0, dim),
         )
     }

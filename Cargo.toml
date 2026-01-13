@@ -1,0 +1,40 @@
+[package]
+name = "innr"
+version = "0.1.0"
+edition = "2021"
+description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/innr"
+keywords = ["simd", "vector", "similarity", "dot-product", "cosine"]
+categories = ["algorithms", "science"]
+
+[features]
+default = []
+# ColBERT MaxSim late interaction scoring
+maxsim = []
+# Sparse vector dot product (sorted index merge)
+sparse = []
+# All features
+full = ["maxsim", "sparse"]
+
+[dependencies]
+# No dependencies for core operations - just std
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+proptest = "1.4"
+
+[[bench]]
+name = "dense"
+harness = false
+
+[[bench]]
+name = "sparse"
+harness = false
+required-features = ["sparse"]
+
+[[bench]]
+name = "maxsim"
+harness = false
+required-features = ["maxsim"]

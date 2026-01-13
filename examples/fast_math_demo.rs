@@ -2,6 +2,22 @@
 //!
 //! Demonstrates Newton-Raphson rsqrt approximation for 3-10x faster cosine similarity.
 //!
+//! # Why Fast Approximations Matter
+//!
+//! In ANN search, distance computation dominates runtime. HNSW makes O(log n) hops
+//! but each hop computes distance to M neighbors (~32). At 1M vectors, that's
+//! ~20 hops * 32 distances = 640 distance calls per query.
+//!
+//! A 3x speedup in cosine = 3x faster search. This is why `innr` exists.
+//!
+//! # Integration
+//!
+//! ```rust,ignore
+//! // vicinity uses innr internally for hot paths
+//! let index = vicinity::hnsw::HNSWIndex::new(dim, m, ef)?;
+//! // distance calls go through innr::cosine or innr::fast_math
+//! ```
+//!
 //! ```bash
 //! cargo run --example fast_math_demo --release
 //! ```

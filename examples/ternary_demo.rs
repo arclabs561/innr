@@ -5,6 +5,19 @@
 //! Ternary excels at: memory compression, fast similarity, deduplication
 //! Ternary struggles with: high-recall nearest neighbor search
 //!
+//! # Scholar Stack Context
+//!
+//! `innr` provides low-level SIMD primitives. Higher-level crates build on these:
+//!
+//! | Level        | Crate            | What it provides              |
+//! |--------------|------------------|-------------------------------|
+//! | **Primitive** | `innr`          | SIMD dot/cosine, ternary ops  |
+//! | **Index**     | `vicinity`      | HNSW, LSH, IVF-PQ, RaBitQ     |
+//! | **Ranking**   | `ordino`        | BM25, reranking, fusion       |
+//! | **Pipeline**  | `hop`           | Ingestion, chunking, retrieval |
+//!
+//! Typical flow: `innr` for distance -> `vicinity` for indexing -> `ordino` for ranking
+//!
 //! ```bash
 //! cargo run --example ternary_demo --release
 //! ```

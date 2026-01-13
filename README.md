@@ -9,7 +9,7 @@ flowchart LR
 
 SIMD-accelerated vector similarity primitives.
 
-MIT OR Apache-2.0
+Dual-licensed under MIT or Apache-2.0.
 
 ```rust
 use innr::{dot, cosine, norm};

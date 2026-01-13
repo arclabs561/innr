@@ -38,12 +38,7 @@
 /// ```
 #[inline]
 #[must_use]
-pub fn sparse_dot(
-    a_indices: &[u32],
-    a_values: &[f32],
-    b_indices: &[u32],
-    b_values: &[f32],
-) -> f32 {
+pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_values: &[f32]) -> f32 {
     debug_assert_eq!(
         a_indices.len(),
         a_values.len(),

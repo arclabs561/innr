@@ -63,11 +63,19 @@ fn test_colbert_style_maxsim() {
     let dim = 128; // ColBERT dimension
 
     let query_tokens: Vec<Vec<f32>> = (0..query_len)
-        .map(|i| (0..dim).map(|j| ((i * dim + j) as f32 * 0.01).sin()).collect())
+        .map(|i| {
+            (0..dim)
+                .map(|j| ((i * dim + j) as f32 * 0.01).sin())
+                .collect()
+        })
         .collect();
 
     let doc_tokens: Vec<Vec<f32>> = (0..doc_len)
-        .map(|i| (0..dim).map(|j| ((i * dim + j) as f32 * 0.01).cos()).collect())
+        .map(|i| {
+            (0..dim)
+                .map(|j| ((i * dim + j) as f32 * 0.01).cos())
+                .collect()
+        })
         .collect();
 
     let q_refs: Vec<&[f32]> = query_tokens.iter().map(|v| v.as_slice()).collect();
@@ -75,11 +83,7 @@ fn test_colbert_style_maxsim() {
 
     // MaxSim should be sum of max similarities
     let score = innr::maxsim(&q_refs, &d_refs);
-    assert!(
-        score.is_finite(),
-        "MaxSim should be finite: {}",
-        score
-    );
+    assert!(score.is_finite(), "MaxSim should be finite: {}", score);
 
     // MaxSim-cosine should be bounded by query token count
     let cos_score = innr::maxsim_cosine(&q_refs, &d_refs);
@@ -142,7 +146,9 @@ fn test_edge_cases() {
     let _ = result;
 
     // Mixed positive/negative
-    let mixed: Vec<f32> = (0..128).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+    let mixed: Vec<f32> = (0..128)
+        .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+        .collect();
     let result = innr::dot(&mixed, &mixed);
     assert!((result - 128.0).abs() < 0.01);
 }

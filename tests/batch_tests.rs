@@ -61,10 +61,7 @@ fn from_flat_matches_from_rows() {
 
 #[test]
 fn get_unchecked_matches_get() {
-    let vectors = vec![
-        vec![1.0, 2.0, 3.0],
-        vec![4.0, 5.0, 6.0],
-    ];
+    let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
     let batch = VerticalBatch::from_rows(&vectors);
 
     for d in 0..batch.dimension() {
@@ -78,11 +75,7 @@ fn get_unchecked_matches_get() {
 
 #[test]
 fn dimension_slice_correct() {
-    let vectors = vec![
-        vec![1.0, 2.0],
-        vec![3.0, 4.0],
-        vec![5.0, 6.0],
-    ];
+    let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
     let batch = VerticalBatch::from_rows(&vectors);
 
     // dimension 0: [1.0, 3.0, 5.0]
@@ -115,10 +108,7 @@ fn extract_vector_roundtrip() {
 
 #[test]
 fn l2_squared_identity() {
-    let vectors = vec![
-        vec![1.0, 2.0, 3.0],
-        vec![4.0, 5.0, 6.0],
-    ];
+    let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
     let batch = VerticalBatch::from_rows(&vectors);
 
     // Distance from v0 to itself should be 0
@@ -214,29 +204,20 @@ fn cosine_normalized() {
 
 #[test]
 fn knn_returns_k_results() {
-    let vectors: Vec<Vec<f32>> = (0..100)
-        .map(|i| vec![i as f32, 0.0])
-        .collect();
+    let vectors: Vec<Vec<f32>> = (0..100).map(|i| vec![i as f32, 0.0]).collect();
     let batch = VerticalBatch::from_rows(&vectors);
     let query = vec![50.0, 0.0];
 
     for k in [1, 5, 10, 50, 100] {
         let result = batch_knn(&query, &batch, k);
-        assert_eq!(
-            result.indices.len(),
-            k,
-            "Should return {} results",
-            k
-        );
+        assert_eq!(result.indices.len(), k, "Should return {} results", k);
         assert_eq!(result.distances.len(), k);
     }
 }
 
 #[test]
 fn knn_results_sorted() {
-    let vectors: Vec<Vec<f32>> = (0..50)
-        .map(|i| vec![i as f32, (i as f32).sin()])
-        .collect();
+    let vectors: Vec<Vec<f32>> = (0..50).map(|i| vec![i as f32, (i as f32).sin()]).collect();
     let batch = VerticalBatch::from_rows(&vectors);
     let query = vec![25.0, 0.0];
 
@@ -319,11 +300,7 @@ fn pruning_filters_far_vectors() {
 
 #[test]
 fn pruning_returns_correct_distances() {
-    let vectors = vec![
-        vec![0.0, 0.0],
-        vec![1.0, 0.0],
-        vec![0.0, 2.0],
-    ];
+    let vectors = vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![0.0, 2.0]];
     let batch = VerticalBatch::from_rows(&vectors);
     let query = vec![0.0, 0.0];
 
@@ -343,9 +320,7 @@ fn pruning_returns_correct_distances() {
 
 #[test]
 fn pruning_tight_threshold() {
-    let vectors: Vec<Vec<f32>> = (0..100)
-        .map(|i| vec![i as f32, 0.0])
-        .collect();
+    let vectors: Vec<Vec<f32>> = (0..100).map(|i| vec![i as f32, 0.0]).collect();
     let batch = VerticalBatch::from_rows(&vectors);
     let query = vec![50.0, 0.0];
 
@@ -364,10 +339,7 @@ fn pruning_tight_threshold() {
 
 #[test]
 fn knn_k_larger_than_batch() {
-    let vectors = vec![
-        vec![1.0, 2.0],
-        vec![3.0, 4.0],
-    ];
+    let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
     let batch = VerticalBatch::from_rows(&vectors);
     let query = vec![0.0, 0.0];
 
@@ -391,9 +363,9 @@ fn knn_k_zero() {
 #[test]
 fn batch_norms_correct() {
     let vectors = vec![
-        vec![3.0, 4.0],  // norm = 5
-        vec![1.0, 0.0],  // norm = 1
-        vec![0.0, 0.0],  // norm = 0
+        vec![3.0, 4.0], // norm = 5
+        vec![1.0, 0.0], // norm = 1
+        vec![0.0, 0.0], // norm = 0
     ];
     let batch = VerticalBatch::from_rows(&vectors);
     let norms = batch_norms(&batch);
@@ -407,7 +379,7 @@ fn batch_norms_correct() {
 fn cosine_with_zero_norm() {
     let vectors = vec![
         vec![1.0, 0.0],
-        vec![0.0, 0.0],  // Zero vector
+        vec![0.0, 0.0], // Zero vector
     ];
     let batch = VerticalBatch::from_rows(&vectors);
     let norms = batch_norms(&batch);
@@ -424,7 +396,7 @@ fn cosine_with_zero_query() {
     let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
     let batch = VerticalBatch::from_rows(&vectors);
     let norms = batch_norms(&batch);
-    let query = vec![0.0, 0.0];  // Zero query
+    let query = vec![0.0, 0.0]; // Zero query
 
     let cosines = batch_cosine(&query, &batch, &norms);
 

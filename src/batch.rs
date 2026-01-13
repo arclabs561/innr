@@ -181,9 +181,7 @@ impl VerticalBatch {
 
     /// Extract a single vector (allocates).
     pub fn extract_vector(&self, vec_idx: usize) -> Vec<f32> {
-        (0..self.dimension)
-            .map(|d| self.get(d, vec_idx))
-            .collect()
+        (0..self.dimension).map(|d| self.get(d, vec_idx)).collect()
     }
 }
 
@@ -402,7 +400,12 @@ pub fn batch_knn_adaptive(
     }
 
     // Phase 2: Process remaining dimensions with pruning
-    for (d, &q_d) in query.iter().enumerate().skip(warmup_dims).take(batch.dimension - warmup_dims) {
+    for (d, &q_d) in query
+        .iter()
+        .enumerate()
+        .skip(warmup_dims)
+        .take(batch.dimension - warmup_dims)
+    {
         let dim_slice = batch.dimension_slice(d);
 
         for ((&v_d, dist), is_alive) in dim_slice
@@ -596,11 +599,7 @@ mod tests {
 
     #[test]
     fn test_batch_cosine() {
-        let vectors = vec![
-            vec![1.0, 0.0],
-            vec![0.0, 1.0],
-            vec![1.0, 1.0],
-        ];
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![1.0, 1.0]];
         let batch = VerticalBatch::from_rows(&vectors);
         let norms = batch_norms(&batch);
         let query = vec![1.0, 0.0];
@@ -608,7 +607,7 @@ mod tests {
         let cosines = batch_cosine(&query, &batch, &norms);
 
         assert!((cosines[0] - 1.0).abs() < 1e-6); // Parallel
-        assert!(cosines[1].abs() < 1e-6);          // Orthogonal
+        assert!(cosines[1].abs() < 1e-6); // Orthogonal
         assert!((cosines[2] - 0.7071).abs() < 0.01); // 45 degrees
     }
 }

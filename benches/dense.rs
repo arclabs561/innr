@@ -72,5 +72,11 @@ fn bench_l2_distance(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_dot, bench_cosine, bench_norm, bench_l2_distance);
+criterion_group!(
+    benches,
+    bench_dot,
+    bench_cosine,
+    bench_norm,
+    bench_l2_distance
+);
 criterion_main!(benches);

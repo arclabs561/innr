@@ -24,7 +24,6 @@ fn norm_reference(v: &[f32]) -> f32 {
     dot_reference(v, v).sqrt()
 }
 
-
 /// Generate vectors of specific sizes to test SIMD boundaries.
 fn arb_vec_pair(len: usize) -> impl Strategy<Value = (Vec<f32>, Vec<f32>)> {
     (
@@ -336,6 +335,180 @@ fn test_l2_sq_at_simd_boundaries() {
             result,
             expected,
             (result - expected).abs()
+        );
+    }
+}
+
+// =============================================================================
+// Batch operation property tests
+// =============================================================================
+
+mod batch_props {
+    use super::*;
+    use innr::batch::{
+        batch_cosine, batch_dot, batch_knn, batch_l2_squared, batch_norms, VerticalBatch,
+    };
+
+    /// Generate a batch of vectors.
+    fn arb_batch(
+        num_vectors: usize,
+        dim: usize,
+    ) -> impl Strategy<Value = (Vec<Vec<f32>>, Vec<f32>)> {
+        (
+            proptest::collection::vec(
+                proptest::collection::vec(-10.0f32..10.0, dim),
+                num_vectors,
+            ),
+            proptest::collection::vec(-10.0f32..10.0, dim),
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(200))]
+
+        /// Batch L2 squared matches individual computations.
+        #[test]
+        fn batch_l2_matches_individual((vectors, query) in arb_batch(20, 32)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let batch_results = batch_l2_squared(&query, &batch);
+
+            for (i, vec) in vectors.iter().enumerate() {
+                let individual = innr::l2_distance_squared(&query, vec);
+                let tolerance = individual.abs() * 1e-4 + 1e-5;
+                prop_assert!(
+                    (batch_results[i] - individual).abs() < tolerance,
+                    "Batch L2 mismatch at {}: {} vs {}",
+                    i, batch_results[i], individual
+                );
+            }
+        }
+
+        /// Batch dot matches individual computations.
+        /// Note: Batch and individual may accumulate in different orders,
+        /// leading to small floating-point differences.
+        #[test]
+        fn batch_dot_matches_individual((vectors, query) in arb_batch(20, 32)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let batch_results = batch_dot(&query, &batch);
+
+            for (i, vec) in vectors.iter().enumerate() {
+                let individual = innr::dot(&query, vec);
+                // Tolerance accounts for accumulation order differences
+                let sum_abs: f32 = query.iter().zip(vec.iter())
+                    .map(|(a, b)| (a * b).abs())
+                    .sum();
+                let tolerance = sum_abs * 1e-4 + 1e-4;
+                prop_assert!(
+                    (batch_results[i] - individual).abs() < tolerance,
+                    "Batch dot mismatch at {}: {} vs {} (tol: {})",
+                    i, batch_results[i], individual, tolerance
+                );
+            }
+        }
+
+        /// Batch norms are non-negative.
+        #[test]
+        fn batch_norms_nonnegative((vectors, _) in arb_batch(20, 32)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let norms = batch_norms(&batch);
+
+            for (i, &n) in norms.iter().enumerate() {
+                prop_assert!(n >= 0.0, "Norm at {} should be non-negative: {}", i, n);
+            }
+        }
+
+        /// Batch cosine is bounded [-1, 1].
+        #[test]
+        fn batch_cosine_bounded(
+            (vectors, query) in arb_batch(20, 32).prop_filter("non-zero", |(vecs, q)| {
+                q.iter().any(|x| x.abs() > 1e-6) &&
+                vecs.iter().all(|v| v.iter().any(|x| x.abs() > 1e-6))
+            })
+        ) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let norms = batch_norms(&batch);
+            let cosines = batch_cosine(&query, &batch, &norms);
+
+            for (i, &c) in cosines.iter().enumerate() {
+                prop_assert!(
+                    (-1.0 - 1e-4..=1.0 + 1e-4).contains(&c),
+                    "Cosine at {} out of bounds: {}",
+                    i, c
+                );
+            }
+        }
+
+        /// kNN returns sorted results.
+        #[test]
+        fn batch_knn_sorted((vectors, query) in arb_batch(50, 16)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let result = batch_knn(&query, &batch, 10);
+
+            for i in 1..result.distances.len() {
+                prop_assert!(
+                    result.distances[i] >= result.distances[i - 1] - 1e-6,
+                    "kNN not sorted: {} > {} at {}",
+                    result.distances[i - 1], result.distances[i], i
+                );
+            }
+        }
+
+        /// kNN indices are unique.
+        #[test]
+        fn batch_knn_unique_indices((vectors, query) in arb_batch(50, 16)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+            let result = batch_knn(&query, &batch, 20);
+
+            let unique: std::collections::HashSet<_> = result.indices.iter().collect();
+            prop_assert_eq!(
+                unique.len(),
+                result.indices.len(),
+                "kNN indices not unique"
+            );
+        }
+
+        /// Vertical batch roundtrip preserves data.
+        #[test]
+        fn batch_roundtrip((vectors, _) in arb_batch(10, 16)) {
+            let batch = VerticalBatch::from_rows(&vectors);
+
+            for (i, original) in vectors.iter().enumerate() {
+                let extracted = batch.extract_vector(i);
+                for (j, (&orig, &ext)) in original.iter().zip(extracted.iter()).enumerate() {
+                    prop_assert!(
+                        (orig - ext).abs() < 1e-6,
+                        "Roundtrip mismatch at [{}, {}]: {} vs {}",
+                        i, j, orig, ext
+                    );
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Triangle inequality tests
+// =============================================================================
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(200))]
+
+    /// L2 distance satisfies triangle inequality.
+    #[test]
+    fn l2_triangle_inequality(
+        a in proptest::collection::vec(-10.0f32..10.0, 32),
+        b in proptest::collection::vec(-10.0f32..10.0, 32),
+        c in proptest::collection::vec(-10.0f32..10.0, 32),
+    ) {
+        let ab = innr::l2_distance(&a, &b);
+        let bc = innr::l2_distance(&b, &c);
+        let ac = innr::l2_distance(&a, &c);
+
+        // ac <= ab + bc (with tolerance for floating point)
+        prop_assert!(
+            ac <= ab + bc + 1e-4,
+            "Triangle inequality violated: {} > {} + {} = {}",
+            ac, ab, bc, ab + bc
         );
     }
 }

@@ -52,10 +52,10 @@ proptest! {
     fn maxsim_not_commutative((query, doc) in arb_token_pair(2, 4, 32)) {
         let q: Vec<&[f32]> = query.iter().map(|v| v.as_slice()).collect();
         let d: Vec<&[f32]> = doc.iter().map(|v| v.as_slice()).collect();
-        
+
         let qd = innr::maxsim(&q, &d);
         let dq = innr::maxsim(&d, &q);
-        
+
         // With different token counts, scores should generally differ
         // This test documents the important invariant that order matters
         prop_assert!(
@@ -75,15 +75,15 @@ proptest! {
     ) {
         let query: Vec<&[f32]> = vec![query_token.as_slice()];
         let doc: Vec<&[f32]> = doc_tokens.iter().map(|v| v.as_slice()).collect();
-        
+
         let maxsim_score = innr::maxsim(&query, &doc);
-        
+
         // Should equal max(dot(query_token, doc_token) for all doc_tokens)
         let max_dot: f32 = doc_tokens
             .iter()
             .map(|d| innr::dot(&query_token, d))
             .fold(f32::NEG_INFINITY, f32::max);
-        
+
         let tolerance = max_dot.abs() * 1e-4 + 1e-5;
         prop_assert!(
             (maxsim_score - max_dot).abs() < tolerance,
@@ -103,16 +103,16 @@ proptest! {
         let q1: Vec<&[f32]> = query1.iter().map(|v| v.as_slice()).collect();
         let q2: Vec<&[f32]> = query2.iter().map(|v| v.as_slice()).collect();
         let d: Vec<&[f32]> = doc.iter().map(|v| v.as_slice()).collect();
-        
+
         let score1 = innr::maxsim(&q1, &d);
         let score2 = innr::maxsim(&q2, &d);
-        
+
         // Combined query
         let mut combined_query = query1.clone();
         combined_query.extend(query2.iter().cloned());
         let combined: Vec<&[f32]> = combined_query.iter().map(|v| v.as_slice()).collect();
         let score_combined = innr::maxsim(&combined, &d);
-        
+
         let expected = score1 + score2;
         // Use tolerance based on max magnitude to handle catastrophic cancellation
         let max_magnitude = score1.abs().max(score2.abs()).max(1.0);
@@ -136,7 +136,7 @@ proptest! {
     ) {
         let t: Vec<&[f32]> = tokens.iter().map(|v| v.as_slice()).collect();
         let score = innr::maxsim(&t, &t);
-        
+
         prop_assert!(
             score >= 0.0,
             "MaxSim with identical tokens should be non-negative, got {}",
@@ -149,13 +149,13 @@ proptest! {
     fn maxsim_cosine_bounded((query, doc) in arb_token_pair(4, 8, 32)) {
         let q: Vec<&[f32]> = query.iter().map(|v| v.as_slice()).collect();
         let d: Vec<&[f32]> = doc.iter().map(|v| v.as_slice()).collect();
-        
+
         let score = innr::maxsim_cosine(&q, &d);
-        
+
         // Each query token contributes at most 1.0 (max cosine similarity)
         let upper_bound = query.len() as f32 + 1e-5;
         let lower_bound = -(query.len() as f32) - 1e-5;
-        
+
         prop_assert!(
             score >= lower_bound && score <= upper_bound,
             "MaxSim-cosine {} out of bounds [{}, {}]",

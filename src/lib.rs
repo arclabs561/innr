@@ -3,8 +3,8 @@
 //! `innr` (from "inner product") provides building blocks for embedding similarity:
 //!
 //! - **Dense**: [`dot`], [`cosine`], [`norm`], [`l2_distance`]
-//! - **Sparse**: [`sparse_dot`] (feature `sparse`)
-//! - **Late interaction**: [`maxsim`] (feature `maxsim`)
+//! - **Sparse**: `sparse_dot` (feature `sparse`)
+//! - **Late interaction**: `maxsim` (feature `maxsim`)
 //!
 //! # SIMD Dispatch
 //!

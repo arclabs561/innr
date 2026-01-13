@@ -2,7 +2,7 @@
 name = "innr"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.89"
 description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/arclabs561/innr"

@@ -1,0 +1,19 @@
+# Cross-rs configuration for QEMU-based testing
+# See: https://github.com/cross-rs/cross
+
+[build.env]
+passthrough = [
+    "RUST_BACKTRACE",
+    "RUST_LOG",
+]
+
+# ARM64 (NEON)
+[target.aarch64-unknown-linux-gnu]
+# Use QEMU user-mode emulation
+# Tests will run via: cross test --target aarch64-unknown-linux-gnu
+
+# ARMv7 (NEON)
+[target.armv7-unknown-linux-gnueabihf]
+
+# x86_64 with specific features can be tested natively
+# For AVX-512, requires hardware support or Intel SDE

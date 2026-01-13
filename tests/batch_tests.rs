@@ -121,8 +121,8 @@ fn l2_squared_symmetric() {
     let v1 = vec![1.0, 2.0, 3.0];
     let v2 = vec![4.0, 5.0, 6.0];
 
-    let batch1 = VerticalBatch::from_rows(&[v1.clone()]);
-    let batch2 = VerticalBatch::from_rows(&[v2.clone()]);
+    let batch1 = VerticalBatch::from_rows(std::slice::from_ref(&v1));
+    let batch2 = VerticalBatch::from_rows(std::slice::from_ref(&v2));
 
     let d12 = batch_l2_squared(&v1, &batch2)[0];
     let d21 = batch_l2_squared(&v2, &batch1)[0];

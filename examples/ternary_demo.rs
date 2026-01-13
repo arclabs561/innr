@@ -103,7 +103,7 @@ fn demo_compression() {
 
     for (name, dim, n) in configs {
         let f32_bytes = (n as u64) * (dim as u64) * 4;
-        let ternary_bytes = (n as u64) * ((dim as u64 + 3) / 4);
+        let ternary_bytes = (n as u64) * (dim as u64).div_ceil(4);
 
         let f32_str = format_bytes(f32_bytes);
         let ternary_str = format_bytes(ternary_bytes);
@@ -182,123 +182,95 @@ fn demo_speed() {
 }
 
 fn demo_deduplication() {
-    println!("3. Where Ternary Shines: Deduplication");
-    println!("   ------------------------------------\n");
+    println!("3. Where Ternary Shines: Fast Similarity Screening");
+    println!("   -------------------------------------------------\n");
 
-    println!("   Deduplication doesn't need exact rankings - just finding near-duplicates.\n");
+    println!("   Ternary preserves relative similarity well for rough screening.\n");
 
     let dim = 768;
-    let n_docs = 5000;
+    let n_topics = 50;
     let threshold = 0.01;
 
-    // Generate documents with some duplicates
-    let mut docs_f32: Vec<Vec<f32>> = Vec::new();
-    let mut is_duplicate: Vec<bool> = Vec::new();
+    // Generate pairs: same-topic and different-topic
+    let n_pairs = 1000;
+    let mut same_topic_corr = Vec::new();
+    let mut diff_topic_corr = Vec::new();
 
-    for i in 0..n_docs {
-        if i > 0 && i % 50 == 0 {
-            // Create near-duplicate of random earlier doc
-            let orig_idx = (i * 7) % i;
-            let mut dup = docs_f32[orig_idx].clone();
-            // Add tiny noise
-            for (j, x) in dup.iter_mut().enumerate() {
-                let noise = lcg_random((i * dim + j) as u64) * 0.01 - 0.005;
-                *x += noise;
-            }
-            // Renormalize
-            let norm: f32 = dup.iter().map(|x| x * x).sum::<f32>().sqrt();
-            for x in &mut dup {
-                *x /= norm;
-            }
-            docs_f32.push(dup);
-            is_duplicate.push(true);
-        } else {
-            docs_f32.push(generate_embedding(dim, i as u64, 50));
-            is_duplicate.push(false);
-        }
+    for i in 0..n_pairs {
+        // Same topic pair (docs i and i+n_topics share the same topic cluster)
+        let doc1 = generate_embedding(dim, i as u64, n_topics);
+        let doc2 = generate_embedding(dim, (i + n_topics) as u64, n_topics);
+        let t1 = encode_ternary(&doc1, threshold);
+        let t2 = encode_ternary(&doc2, threshold);
+
+        let f32_sim = dot(&doc1, &doc2);
+        let tern_sim = ternary_dot(&t1, &t2) as f32 / dim as f32;
+        same_topic_corr.push((f32_sim, tern_sim));
+
+        // Different topic pair
+        let doc3 = generate_embedding(dim, (i + n_topics / 2) as u64, n_topics);
+        let t3 = encode_ternary(&doc3, threshold);
+
+        let f32_sim2 = dot(&doc1, &doc3);
+        let tern_sim2 = ternary_dot(&t1, &t3) as f32 / dim as f32;
+        diff_topic_corr.push((f32_sim2, tern_sim2));
     }
 
-    let n_true_dups = is_duplicate.iter().filter(|&&b| b).count();
-
-    // Encode to ternary
-    let docs_ternary: Vec<PackedTernary> = docs_f32
+    // Compute rank correlation (Spearman-ish: does ternary order match f32 order?)
+    let all_pairs: Vec<(f32, f32)> = same_topic_corr
         .iter()
-        .map(|d| encode_ternary(d, threshold))
+        .chain(diff_topic_corr.iter())
+        .copied()
         .collect();
 
-    // Find duplicates using ternary similarity threshold
-    // Ternary dot ranges from -dim to +dim, so ~0.9*dim for near-duplicates
-    let dup_threshold_ternary = (dim as i32 * 6) / 10; // 60% of max (conservative)
-    let dup_threshold_f32 = 0.98; // Very high for f32
+    // Sort by f32 similarity
+    let mut by_f32 = all_pairs.clone();
+    by_f32.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
-    let mut ternary_found = 0;
-    let mut f32_found = 0;
-    let mut ternary_false_positives = 0;
-    let mut f32_false_positives = 0;
+    // Sort by ternary similarity
+    let mut by_tern = all_pairs.clone();
+    by_tern.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    for i in 1..n_docs {
-        for j in 0..i {
-            let tern_sim = ternary_dot(&docs_ternary[i], &docs_ternary[j]);
-            let f32_sim = dot(&docs_f32[i], &docs_f32[j]);
+    // Count how many of f32's top-100 are also in ternary's top-100
+    let f32_top: std::collections::HashSet<usize> = by_f32
+        .iter()
+        .take(100)
+        .map(|p| all_pairs.iter().position(|x| x == p).unwrap())
+        .collect();
+    let tern_top: std::collections::HashSet<usize> = by_tern
+        .iter()
+        .take(100)
+        .map(|p| all_pairs.iter().position(|x| x == p).unwrap())
+        .collect();
 
-            let tern_dup = tern_sim > dup_threshold_ternary;
-            let f32_dup = f32_sim > dup_threshold_f32;
-            let true_dup = is_duplicate[i] && (j == (i * 7) % i);
-
-            if tern_dup && true_dup {
-                ternary_found += 1;
-            }
-            if tern_dup && !true_dup {
-                ternary_false_positives += 1;
-            }
-            if f32_dup && true_dup {
-                f32_found += 1;
-            }
-            if f32_dup && !true_dup {
-                f32_false_positives += 1;
-            }
-        }
-    }
+    let overlap = f32_top.intersection(&tern_top).count();
 
     println!(
-        "   {} documents with {} near-duplicates\n",
-        n_docs, n_true_dups
+        "   Rank preservation test ({} similarity pairs):",
+        n_pairs * 2
     );
-    println!(
-        "   {:20} {:>12} {:>15} {:>12}",
-        "Method", "Found", "False Positives", "Precision"
-    );
-    println!("   {}", "-".repeat(65));
+    println!("     Overlap in top-100 most similar: {}%\n", overlap);
 
-    let tern_precision = if ternary_found + ternary_false_positives > 0 {
-        ternary_found as f64 / (ternary_found + ternary_false_positives) as f64
-    } else {
-        0.0
-    };
-    let f32_precision = if f32_found + f32_false_positives > 0 {
-        f32_found as f64 / (f32_found + f32_false_positives) as f64
-    } else {
-        0.0
-    };
+    // Show distribution of scores
+    let same_f32_mean: f32 = same_topic_corr.iter().map(|(f, _)| f).sum::<f32>() / n_pairs as f32;
+    let diff_f32_mean: f32 = diff_topic_corr.iter().map(|(f, _)| f).sum::<f32>() / n_pairs as f32;
+    let same_tern_mean: f32 = same_topic_corr.iter().map(|(_, t)| t).sum::<f32>() / n_pairs as f32;
+    let diff_tern_mean: f32 = diff_topic_corr.iter().map(|(_, t)| t).sum::<f32>() / n_pairs as f32;
 
+    println!("   Similarity distributions:");
+    println!("   {:12} {:>15} {:>15}", "", "Same Topic", "Diff Topic");
+    println!("   {}", "-".repeat(45));
     println!(
-        "   {:20} {:>12} {:>15} {:>11.1}%",
-        "Ternary",
-        format!("{}/{}", ternary_found, n_true_dups),
-        ternary_false_positives,
-        tern_precision * 100.0
+        "   {:12} {:>15.3} {:>15.3}",
+        "f32 mean", same_f32_mean, diff_f32_mean
     );
     println!(
-        "   {:20} {:>12} {:>15} {:>11.1}%",
-        "f32",
-        format!("{}/{}", f32_found, n_true_dups),
-        f32_false_positives,
-        f32_precision * 100.0
+        "   {:12} {:>15.3} {:>15.3}",
+        "Ternary mean", same_tern_mean, diff_tern_mean
     );
 
-    println!(
-        "\n   Ternary works well for deduplication where high precision matters more than recall."
-    );
+    println!("\n   Both methods separate same-topic from different-topic pairs.");
+    println!("   Ternary preserves rough ordering for fast pre-filtering.");
     println!();
 }
 
@@ -322,7 +294,7 @@ fn demo_ranking_accuracy() {
         .collect();
 
     // Check sparsity
-    let avg_sparsity: f32 = docs_ternary.iter().map(|d| sparsity(d)).sum::<f32>() / n_docs as f32;
+    let avg_sparsity: f32 = docs_ternary.iter().map(sparsity).sum::<f32>() / n_docs as f32;
 
     println!(
         "   Avg sparsity: {:.1}% (values mapped to 0)",

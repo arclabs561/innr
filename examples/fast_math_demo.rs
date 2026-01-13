@@ -254,19 +254,15 @@ fn demo_search_scenario() {
 
 fn generate_embedding(dim: usize, seed: u64) -> Vec<f32> {
     (0..dim)
-        .map(|i| {
-            let x =
-                ((seed as f64 * 0.618033988 + i as f64 * 0.414213562).fract() * 2.0 - 1.0) as f32;
-            x
-        })
+        .map(|i| ((seed as f64 * 0.618033988 + i as f64 * 0.414213562).fract() * 2.0 - 1.0) as f32)
         .collect()
 }
 
-fn normalize(v: &Vec<f32>) -> Vec<f32> {
+fn normalize(v: &[f32]) -> Vec<f32> {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > f32::EPSILON {
         v.iter().map(|x| x / norm).collect()
     } else {
-        v.clone()
+        v.to_vec()
     }
 }

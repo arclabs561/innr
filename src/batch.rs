@@ -608,6 +608,6 @@ mod tests {
 
         assert!((cosines[0] - 1.0).abs() < 1e-6); // Parallel
         assert!(cosines[1].abs() < 1e-6); // Orthogonal
-        assert!((cosines[2] - 0.7071).abs() < 0.01); // 45 degrees
+        assert!((cosines[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01); // 45 degrees
     }
 }

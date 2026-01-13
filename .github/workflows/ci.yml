@@ -10,8 +10,16 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
 
+# SIMD Testing Strategy (grounded in Cryspen's approach):
+# 1. Native hardware tests (x86 + ARM) for real SIMD execution
+# 2. Cross-compilation checks for target coverage
+# 3. Differential testing: SIMD vs scalar reference implementations
+# 4. Miri for undefined behavior detection (nightly)
+# See: https://cryspen.com/post/specify-rust-simd/
+
 jobs:
-  test:
+  # Primary test suite on x86 (AVX2/AVX-512 available)
+  test-x86:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +29,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features
+      - name: Clippy (strict)
+        run: cargo clippy --all-targets --all-features -- -D clippy::correctness
 
       - name: Build
         run: cargo build --all-features
@@ -33,12 +41,38 @@ jobs:
       - name: Benchmarks compile
         run: cargo build --benches --all-features
 
-  # Test on different architectures for SIMD
-  simd-compat:
+      # Verify SIMD produces correct results vs scalar
+      - name: SIMD differential tests
+        run: cargo test simd_correctness --all-features
+
+  # ARM native testing (M1/M2 NEON)
+  test-arm:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (ARM native)
+        run: cargo build --all-features
+
+      - name: Test (ARM native)
+        run: cargo test --all-features
+
+      - name: SIMD correctness (NEON)
+        run: |
+          cargo run --release --example 01_basic_ops 2>&1 | tee output.txt
+          grep "dot(a, b) = 20" output.txt
+
+  # Cross-compilation check (build only, no execution)
+  cross-compile:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
-    runs-on: ubuntu-latest
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,10 +80,53 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check target
+      - name: Check ${{ matrix.target }}
         run: cargo check --target ${{ matrix.target }} --all-features
 
-  # Note: MSRV check skipped for innr because AVX-512 intrinsics
-  # require unstable stdsimd feature (Rust 1.83+ or nightly).
-  # The crate compiles on stable but MSRV 1.75 cannot verify.
-  # Effective MSRV is Rust stable (latest)
+  # QEMU-based ARM testing (actual execution via emulation)
+  # Uses cross-rs for seamless QEMU integration
+  test-qemu-arm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross-rs
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Test via QEMU (aarch64)
+        run: cross test --target aarch64-unknown-linux-gnu --all-features
+        continue-on-error: true  # QEMU can be flaky
+
+  # Miri for undefined behavior detection
+  # Catches: aliasing violations, uninitialized memory, out-of-bounds
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Miri setup
+        run: cargo miri setup
+
+      - name: Miri tests (safe subset)
+        run: |
+          # Miri can't run SIMD intrinsics, so test scalar paths
+          cargo miri test --lib -- --skip simd
+        continue-on-error: true
+
+  # Property tests with extended iterations
+  property-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run property tests (extended)
+        run: cargo test property_ --all-features
+        env:
+          PROPTEST_CASES: 2000

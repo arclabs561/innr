@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim)"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/innr"
+repository = "https://github.com/arclabs561/innr"
 keywords = ["simd", "vector", "similarity", "dot-product", "cosine"]
 categories = ["algorithms", "science"]
 

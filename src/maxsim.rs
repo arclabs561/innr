@@ -39,6 +39,13 @@
 
 use crate::dense::{cosine, dot};
 
+// arch is only used on architectures with SIMD dispatch
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::arch;
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::MIN_DIM_SIMD;
+
 /// MaxSim: sum over query tokens of max dot product with any doc token.
 ///
 /// # Arguments
@@ -54,6 +61,11 @@ use crate::dense::{cosine, dot};
 ///
 /// - Time: O(|Q| * |D| * dim)
 /// - Space: O(1)
+///
+/// # SIMD Optimization
+///
+/// Automatically dispatches to AVX-512 or AVX2 optimized kernels on x86_64
+/// that process multiple vectors without repeated dispatch overhead.
 ///
 /// # Example
 ///
@@ -82,12 +94,46 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
         return 0.0;
     }
 
+    // Ensure all vectors have same dimension
+    let dim = query_tokens[0].len();
+    debug_assert!(query_tokens.iter().all(|t| t.len() == dim));
+    debug_assert!(doc_tokens.iter().all(|t| t.len() == dim));
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        // AVX-512
+        if dim >= 64 && is_x86_feature_detected!("avx512f") {
+            return unsafe { arch::x86_64::maxsim_avx512(query_tokens, doc_tokens) };
+        }
+
+        // AVX2
+        if dim >= 16 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            return unsafe { arch::x86_64::maxsim_avx2(query_tokens, doc_tokens) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if dim >= 16 {
+            // SAFETY: NEON is always available on aarch64
+            return unsafe { arch::aarch64::maxsim_neon(query_tokens, doc_tokens) };
+        }
+    }
+
+    // Fallback (scalar / auto-vectorized)
+    maxsim_portable(query_tokens, doc_tokens)
+}
+
+/// Portable MaxSim implementation using standard dot product.
+#[inline]
+#[must_use]
+fn maxsim_portable(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     query_tokens
         .iter()
         .map(|q| {
             doc_tokens
                 .iter()
-                .map(|d| dot(q, d))
+                .map(|d| dot(q, d)) // dot() handles its own dispatch, but overhead applies per pair
                 .fold(f32::NEG_INFINITY, f32::max)
         })
         .sum()

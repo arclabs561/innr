@@ -86,6 +86,33 @@ pub unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// NEON MaxSim implementation.
+///
+/// Iterates over query tokens and computes max similarity against all doc tokens
+/// using the unsafe dot_neon kernel directly.
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn maxsim_neon(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
+    let mut total_score = 0.0;
+
+    for q in query_tokens {
+        let mut max_score = f32::NEG_INFINITY;
+        for d in doc_tokens {
+            let score = dot_neon(q, d);
+            if score > max_score {
+                max_score = score;
+            }
+        }
+        total_score += max_score;
+    }
+    
+    total_score
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

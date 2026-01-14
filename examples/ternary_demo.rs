@@ -12,11 +12,11 @@
 //! | Level        | Crate            | What it provides              |
 //! |--------------|------------------|-------------------------------|
 //! | **Primitive** | `innr`          | SIMD dot/cosine, ternary ops  |
-//! | **Index**     | `vicinity`      | HNSW, LSH, IVF-PQ, RaBitQ     |
+//! | **Index**     | `plesio`      | HNSW, LSH, IVF-PQ, RaBitQ     |
 //! | **Ranking**   | `ordino`        | BM25, reranking, fusion       |
 //! | **Pipeline**  | `hop`           | Ingestion, chunking, retrieval |
 //!
-//! Typical flow: `innr` for distance -> `vicinity` for indexing -> `ordino` for ranking
+//! Typical flow: `innr` for distance -> `plesio` for indexing -> `ordino` for ranking
 //!
 //! ```bash
 //! cargo run --example ternary_demo --release

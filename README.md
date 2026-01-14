@@ -1,11 +1,4 @@
-<p align="center"><b>innr</b></p>
-
-```mermaid
-flowchart LR
-    A["a: [f32]"] --> DOT["dot()"]
-    B["b: [f32]"] --> DOT
-    DOT --> R["f32"]
-```
+# innr
 
 SIMD-accelerated vector similarity primitives.
 

@@ -1,7 +1,7 @@
 //! Integration tests verifying `innr` works correctly across the scholar stack.
 //!
 //! These tests ensure that the SIMD primitives produce consistent results
-//! when used by different crates (vicinity, cerno-rerank).
+//! when used by different crates (plesio, cerno-rerank).
 
 use std::time::Instant;
 

@@ -1,10 +1,16 @@
 //! SIMD-accelerated vector similarity primitives.
 //!
-//! `innr` (from "inner product") provides building blocks for embedding similarity:
+//! Fast building blocks for embedding similarity with automatic hardware dispatch.
 //!
-//! - **Dense**: [`dot`], [`cosine`], [`norm`], [`l2_distance`]
-//! - **Sparse**: `sparse_dot` (feature `sparse`)
-//! - **Late interaction**: `maxsim` (feature `maxsim`)
+//! # Which Function Should I Use?
+//!
+//! | Task | Function | Notes |
+//! |------|----------|-------|
+//! | **Similarity (normalized)** | [`cosine`] | Most embeddings are normalized |
+//! | **Similarity (raw)** | [`dot`] | When you know norms |
+//! | **Distance (L2)** | [`l2_distance`] | For k-NN, clustering |
+//! | **Token-level matching** | `maxsim` | ColBERT-style (feature `maxsim`) |
+//! | **Sparse vectors** | `sparse_dot` | BM25 scores (feature `sparse`) |
 //!
 //! # SIMD Dispatch
 //!
@@ -59,7 +65,7 @@
 #![warn(clippy::all)]
 
 mod arch;
-mod dense;
+pub mod dense;
 
 /// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
 pub mod fast_math;
@@ -83,7 +89,7 @@ pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_pr
 pub mod ternary;
 
 #[cfg(feature = "sparse")]
-pub use sparse::{sparse_dot, sparse_dot_portable};
+pub use sparse::{sparse_dot, sparse_dot_portable, sparse_maxsim};
 
 #[cfg(feature = "maxsim")]
 pub use maxsim::{maxsim, maxsim_cosine};

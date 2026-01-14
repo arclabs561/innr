@@ -87,6 +87,36 @@ pub fn sparse_dot_portable(
     result
 }
 
+/// Sparse MaxSim (SPLADE-style) scoring.
+///
+/// Computes `Σᵢ max(w_q[i] * w_d[i])` or similar aggregation for sparse vectors.
+///
+/// For SPLADE, the score is typically just dot product of expanded vectors.
+/// But for "Sparse ColBERT" (late interaction over sparse vectors), we need maxsim.
+///
+/// # Arguments
+/// * `query_tokens` - List of sparse vectors for query tokens
+/// * `doc_tokens` - List of sparse vectors for doc tokens
+///
+/// # Returns
+/// Sum of max similarities.
+pub fn sparse_maxsim(
+    query_tokens: &[(&[u32], &[f32])],
+    doc_tokens: &[(&[u32], &[f32])]
+) -> f32 {
+    if query_tokens.is_empty() || doc_tokens.is_empty() {
+        return 0.0;
+    }
+
+    query_tokens.iter()
+        .map(|(q_idx, q_val)| {
+            doc_tokens.iter()
+                .map(|(d_idx, d_val)| sparse_dot(q_idx, q_val, d_idx, d_val))
+                .fold(f32::NEG_INFINITY, f32::max)
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

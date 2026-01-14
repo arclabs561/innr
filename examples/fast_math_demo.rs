@@ -13,8 +13,8 @@
 //! # Integration
 //!
 //! ```rust,ignore
-//! // vicinity uses innr internally for hot paths
-//! let index = vicinity::hnsw::HNSWIndex::new(dim, m, ef)?;
+//! // plesio uses innr internally for hot paths
+//! let index = plesio::hnsw::HNSWIndex::new(dim, m, ef)?;
 //! // distance calls go through innr::cosine or innr::fast_math
 //! ```
 //!

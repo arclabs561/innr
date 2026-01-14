@@ -103,6 +103,69 @@ pub unsafe fn dot_avx512(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// AVX-512 MaxSim implementation.
+///
+/// Iterates over query tokens and computes max similarity against all doc tokens
+/// using the unsafe dot_avx512 kernel directly to avoid dispatch overhead.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn maxsim_avx512(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
+    let mut total_score = 0.0;
+
+    for q in query_tokens {
+        let mut max_score = f32::NEG_INFINITY;
+        
+        // We could unroll this loop or block it, but since dot_avx512 is already
+        // highly optimized (4-way unrolled internally), calling it directly 
+        // without dispatch overhead is the primary win here.
+        // 
+        // Optimization opportunity: 
+        // If we want to go faster, we should compute multiple dot products in parallel 
+        // (matrix-vector multiplication style) to reuse loaded `q` vectors.
+        // But simply removing dispatch is a big first step.
+        for d in doc_tokens {
+            let score = dot_avx512(q, d);
+            if score > max_score {
+                max_score = score;
+            }
+        }
+        total_score += max_score;
+    }
+    
+    total_score
+}
+
+/// AVX2 MaxSim implementation.
+///
+/// Iterates over query tokens and computes max similarity against all doc tokens
+/// using the unsafe dot_avx2 kernel directly.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` and `is_x86_feature_detected!("fma")`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+pub unsafe fn maxsim_avx2(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
+    let mut total_score = 0.0;
+
+    for q in query_tokens {
+        let mut max_score = f32::NEG_INFINITY;
+        for d in doc_tokens {
+            let score = dot_avx2(q, d);
+            if score > max_score {
+                max_score = score;
+            }
+        }
+        total_score += max_score;
+    }
+    
+    total_score
+}
+
 /// AVX2+FMA dot product with 4-way unrolling.
 ///
 /// Processes 32 floats per iteration (4 x 8), hiding memory latency.

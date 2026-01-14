@@ -13,6 +13,8 @@
 //! | NEON | 16 | 4-8x vs scalar |
 //! | Portable | any | 1x (baseline) |
 
+// arch is only used on architectures with SIMD dispatch
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::arch;
 use crate::NORM_EPSILON;
 

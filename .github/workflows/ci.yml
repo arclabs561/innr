@@ -45,6 +45,10 @@ jobs:
       - name: SIMD differential tests
         run: cargo test simd_correctness --all-features
 
+      # Numerical edge cases (denormals, boundaries, cancellation)
+      - name: Numerical edge cases
+        run: cargo test --test numerical_edge_cases --all-features
+
   # ARM native testing (M1/M2 NEON)
   test-arm:
     runs-on: macos-latest

@@ -291,7 +291,7 @@ fn simd_invariant_cosine_range() {
             let b = test_vec(dim, seed + 100);
             let sim = cosine(&a, &b);
             assert!(
-                sim >= -1.0 - 1e-5 && sim <= 1.0 + 1e-5,
+                (-1.0 - 1e-5..=1.0 + 1e-5).contains(&sim),
                 "cosine should be in [-1, 1], got {}",
                 sim
             );

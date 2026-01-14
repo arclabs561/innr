@@ -109,7 +109,7 @@ pub unsafe fn maxsim_neon(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32
         }
         total_score += max_score;
     }
-    
+
     total_score
 }
 

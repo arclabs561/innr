@@ -100,17 +100,16 @@ pub fn sparse_dot_portable(
 ///
 /// # Returns
 /// Sum of max similarities.
-pub fn sparse_maxsim(
-    query_tokens: &[(&[u32], &[f32])],
-    doc_tokens: &[(&[u32], &[f32])]
-) -> f32 {
+pub fn sparse_maxsim(query_tokens: &[(&[u32], &[f32])], doc_tokens: &[(&[u32], &[f32])]) -> f32 {
     if query_tokens.is_empty() || doc_tokens.is_empty() {
         return 0.0;
     }
 
-    query_tokens.iter()
+    query_tokens
+        .iter()
         .map(|(q_idx, q_val)| {
-            doc_tokens.iter()
+            doc_tokens
+                .iter()
                 .map(|(d_idx, d_val)| sparse_dot(q_idx, q_val, d_idx, d_val))
                 .fold(f32::NEG_INFINITY, f32::max)
         })
@@ -177,5 +176,158 @@ mod tests {
         // Only index 2 overlaps: 3*10 = 30
         let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
         assert!((result - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_maxsim_basic() {
+        // Query: 2 tokens, Doc: 2 tokens
+        let q1_idx = [0u32, 1];
+        let q1_val = [1.0f32, 2.0];
+        let q2_idx = [2u32, 3];
+        let q2_val = [3.0f32, 4.0];
+
+        let d1_idx = [0u32, 2];
+        let d1_val = [0.5f32, 1.5];
+        let d2_idx = [1u32, 3];
+        let d2_val = [2.5f32, 3.5];
+
+        let query = vec![(&q1_idx[..], &q1_val[..]), (&q2_idx[..], &q2_val[..])];
+        let doc = vec![(&d1_idx[..], &d1_val[..]), (&d2_idx[..], &d2_val[..])];
+
+        let result = sparse_maxsim(&query, &doc);
+
+        // q1 vs d1: 1.0*0.5 = 0.5, q1 vs d2: 2.0*2.5 = 5.0 -> max = 5.0
+        // q2 vs d1: 3.0*1.5 = 4.5, q2 vs d2: 4.0*3.5 = 14.0 -> max = 14.0
+        // sum = 5.0 + 14.0 = 19.0
+        assert!((result - 19.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_maxsim_empty_query() {
+        let doc: Vec<(&[u32], &[f32])> = vec![(&[0u32][..], &[1.0f32][..])];
+        let query: Vec<(&[u32], &[f32])> = vec![];
+        assert_eq!(sparse_maxsim(&query, &doc), 0.0);
+    }
+
+    #[test]
+    fn test_sparse_maxsim_empty_doc() {
+        let query: Vec<(&[u32], &[f32])> = vec![(&[0u32][..], &[1.0f32][..])];
+        let doc: Vec<(&[u32], &[f32])> = vec![];
+        assert_eq!(sparse_maxsim(&query, &doc), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Generate a sorted sparse vector with bounded values to avoid overflow.
+    /// Values are in [-1000, 1000] to prevent multiplication overflow.
+    fn arb_sparse_vec_bounded(
+        max_len: usize,
+        max_idx: u32,
+    ) -> impl Strategy<Value = (Vec<u32>, Vec<f32>)> {
+        prop::collection::vec(0..max_idx, 0..=max_len).prop_flat_map(move |mut indices| {
+            // Sort and dedup to get unique sorted indices
+            indices.sort_unstable();
+            indices.dedup();
+            let n = indices.len();
+            // Use bounded floats to avoid overflow
+            prop::collection::vec(-1000.0f32..1000.0f32, n)
+                .prop_map(move |values| (indices.clone(), values))
+        })
+    }
+
+    proptest! {
+        /// Sparse dot is commutative: dot(a, b) == dot(b, a)
+        #[test]
+        fn sparse_dot_commutative(
+            (a_idx, a_val) in arb_sparse_vec_bounded(20, 1000),
+            (b_idx, b_val) in arb_sparse_vec_bounded(20, 1000)
+        ) {
+            let ab = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+            let ba = sparse_dot(&b_idx, &b_val, &a_idx, &a_val);
+
+            // Commutative within tolerance, or both overflow in same direction
+            let is_equal = (ab - ba).abs() < 1e-3 * ab.abs().max(ba.abs()).max(1.0);
+            let both_inf = ab.is_infinite() && ba.is_infinite() && ab.signum() == ba.signum();
+            let both_nan = ab.is_nan() && ba.is_nan();
+            prop_assert!(is_equal || both_inf || both_nan,
+                "ab={}, ba={}", ab, ba);
+        }
+
+        /// Sparse dot with self equals sum of squared values.
+        #[test]
+        fn sparse_dot_self_is_norm_squared(
+            (idx, val) in arb_sparse_vec_bounded(50, 10000)
+        ) {
+            let result = sparse_dot(&idx, &val, &idx, &val);
+            let expected: f32 = val.iter().map(|v| v * v).sum();
+
+            // Allow for floating-point error proportional to magnitude
+            let tolerance = 1e-4 * expected.abs().max(1.0);
+            prop_assert!(
+                (result - expected).abs() < tolerance,
+                "result={}, expected={}, tolerance={}",
+                result,
+                expected,
+                tolerance
+            );
+        }
+
+        /// Sparse dot result is finite when inputs are bounded.
+        #[test]
+        fn sparse_dot_finite_result(
+            (a_idx, a_val) in arb_sparse_vec_bounded(20, 1000),
+            (b_idx, b_val) in arb_sparse_vec_bounded(20, 1000)
+        ) {
+            let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+            // With bounded inputs, result should be finite
+            prop_assert!(result.is_finite(), "result was not finite: {}", result);
+        }
+
+        /// Sparse dot with disjoint indices is zero.
+        #[test]
+        fn sparse_dot_disjoint_is_zero(
+            (idx, val) in arb_sparse_vec_bounded(20, 500)
+        ) {
+            // Shift b's indices by max(a) + 1 to ensure disjoint
+            let shift = idx.iter().max().copied().unwrap_or(0) + 1;
+            let b_idx: Vec<u32> = idx.iter().map(|i| i + shift).collect();
+
+            let result = sparse_dot(&idx, &val, &b_idx, &val);
+            prop_assert_eq!(result, 0.0);
+        }
+
+        /// Sparse maxsim is non-negative when all values are positive.
+        #[test]
+        fn sparse_maxsim_nonnegative_for_positive_values(
+            n_query in 1usize..5,
+            n_doc in 1usize..5
+        ) {
+            // Generate positive-only values
+            let mut query_tokens = Vec::new();
+            let mut doc_tokens = Vec::new();
+
+            for i in 0..n_query {
+                query_tokens.push((vec![i as u32], vec![1.0f32]));
+            }
+            for i in 0..n_doc {
+                doc_tokens.push((vec![i as u32], vec![1.0f32]));
+            }
+
+            let query: Vec<(&[u32], &[f32])> = query_tokens
+                .iter()
+                .map(|(idx, val)| (idx.as_slice(), val.as_slice()))
+                .collect();
+            let doc: Vec<(&[u32], &[f32])> = doc_tokens
+                .iter()
+                .map(|(idx, val)| (idx.as_slice(), val.as_slice()))
+                .collect();
+
+            let result = sparse_maxsim(&query, &doc);
+            prop_assert!(result >= 0.0, "sparse_maxsim should be non-negative for positive values");
+        }
     }
 }

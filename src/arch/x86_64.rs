@@ -118,13 +118,13 @@ pub unsafe fn maxsim_avx512(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f
 
     for q in query_tokens {
         let mut max_score = f32::NEG_INFINITY;
-        
+
         // We could unroll this loop or block it, but since dot_avx512 is already
-        // highly optimized (4-way unrolled internally), calling it directly 
+        // highly optimized (4-way unrolled internally), calling it directly
         // without dispatch overhead is the primary win here.
-        // 
-        // Optimization opportunity: 
-        // If we want to go faster, we should compute multiple dot products in parallel 
+        //
+        // Optimization opportunity:
+        // If we want to go faster, we should compute multiple dot products in parallel
         // (matrix-vector multiplication style) to reuse loaded `q` vectors.
         // But simply removing dispatch is a big first step.
         for d in doc_tokens {
@@ -135,7 +135,7 @@ pub unsafe fn maxsim_avx512(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f
         }
         total_score += max_score;
     }
-    
+
     total_score
 }
 
@@ -162,7 +162,7 @@ pub unsafe fn maxsim_avx2(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32
         }
         total_score += max_score;
     }
-    
+
     total_score
 }
 

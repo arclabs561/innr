@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 540b60226200eadd66937b6554a748a443a3401d2342c89bfb1a730e7aad121e # shrinks to (idx, val) = ([0], [-9.630408e22])
+cc d814d7ae8140f3d966a6901c757587ec62bfc93073ae389966d678b0ccdce7bc # shrinks to (a_idx, a_val) = ([408], [-2.2202462e34]), (b_idx, b_val) = ([98, 105, 112, 340, 408, 628, 687, 711, 727, 733, 764, 872, 888], [-131274300000000.0, 1.120627e-39, 1.3326736e-5, -0.0, 9.0247316e27, 450748900.0, -2.2356583e-15, -2.261083e17, 4.760257e32, 2.2985028e-23, -0.0, -3762702.8, -3.416079e-5])
+cc 1543c0b997201926980dcfd3a65f6b55875f0b555af77583182474bcaf159e24 # shrinks to (a_idx, a_val) = ([0], [-5.0807995e21]), (b_idx, b_val) = ([0], [-8.011565e18])

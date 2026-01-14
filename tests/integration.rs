@@ -1,4 +1,4 @@
-//! Integration tests verifying `innr` works correctly across the scholar stack.
+//! Integration tests verifying `innr` works correctly across the tekne stack.
 //!
 //! These tests ensure that the SIMD primitives produce consistent results
 //! when used by different crates (plesio, cerno-rerank).

@@ -96,6 +96,7 @@ pub unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
 /// NEON is always available on aarch64.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
+#[allow(dead_code)] // Public for potential external use; internal dispatch uses it conditionally
 pub unsafe fn maxsim_neon(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     let mut total_score = 0.0;
 

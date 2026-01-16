@@ -1,8 +1,8 @@
 [package]
 name = "innr"
 version = "0.1.0"
+authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
-rust-version = "1.89"
 description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/arclabs561/innr"
@@ -23,8 +23,8 @@ full = ["maxsim", "sparse"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-rand = "0.8"
-proptest = "1.4"
+rand = "0.9"
+proptest = "1.5"
 
 [[bench]]
 name = "dense"
@@ -47,21 +47,3 @@ harness = false
 [[bench]]
 name = "ternary"
 harness = false
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-# Enable debug symbols for profiling (flamegraph, perf)
-debug = 1
-
-[profile.bench]
-lto = "thin"
-codegen-units = 1
-debug = 1
-
-# Maximum optimization for production builds
-[profile.release-optimized]
-inherits = "release"
-lto = "fat"
-panic = "abort"
-strip = true

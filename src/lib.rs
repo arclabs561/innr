@@ -65,6 +65,8 @@
 #![warn(clippy::all)]
 
 mod arch;
+pub mod binary;
+pub mod clifford;
 pub mod dense;
 pub mod metric;
 
@@ -81,7 +83,13 @@ mod sparse;
 mod maxsim;
 
 // Re-export core operations
-pub use dense::{cosine, dot, dot_portable, l1_distance, l2_distance, l2_distance_squared, norm};
+pub use dense::{
+    angular_distance, cosine, dot, dot_portable, l1_distance, l2_distance, l2_distance_squared,
+    matryoshka_cosine, matryoshka_dot, norm, pool_mean,
+};
+
+// Re-export binary operations
+pub use binary::{binary_dot, binary_hamming, binary_jaccard, encode_binary, PackedBinary};
 
 // Re-export metric trait surfaces (interfaces only).
 pub use metric::{Quasimetric, SymmetricMetric};

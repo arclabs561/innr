@@ -167,6 +167,74 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+/// Angular distance: `acos(cosine_similarity) / π`.
+///
+/// Unlike cosine similarity, angular distance is a **true metric**:
+/// 1. $d(x, y) \ge 0$
+/// 2. $d(x, y) = 0 \iff x = y$
+/// 3. $d(x, y) = d(y, x)$
+/// 4. $d(x, z) \le d(x, y) + d(y, z)$ (Triangle Inequality)
+///
+/// Range: `[0, 1]`.
+/// - 0: Identical direction
+/// - 0.5: Orthogonal
+/// - 1: Opposite direction
+///
+/// # References
+/// - [Angular distance](https://en.wikipedia.org/wiki/Cosine_similarity#Angular_distance_and_similarity)
+#[inline]
+#[must_use]
+pub fn angular_distance(a: &[f32], b: &[f32]) -> f32 {
+    let sim = cosine(a, b).clamp(-1.0, 1.0);
+    sim.acos() / std::f32::consts::PI
+}
+
+/// Matryoshka-optimized dot product for nested embeddings.
+///
+/// Computes the dot product only on the first `prefix_len` dimensions.
+/// Latest embeddings (MRL) allow variable-length scoring for adaptive retrieval.
+///
+/// # Research Context
+/// Matryoshka Representation Learning (MRL) optimizes representations by training
+/// a single high-dimensional vector such that its prefixes are explicitly supervised.
+/// This enables "train-once, deploy-everywhere" flexibility.
+///
+/// # References
+/// - Kusupati et al. (2022). "Matryoshka Representation Learning" (NeurIPS)
+#[inline]
+#[must_use]
+pub fn matryoshka_dot(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
+    let end = prefix_len.min(a.len()).min(b.len());
+    dot(&a[..end], &b[..end])
+}
+
+/// Matryoshka-optimized cosine similarity.
+#[inline]
+#[must_use]
+pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
+    let end = prefix_len.min(a.len()).min(b.len());
+    cosine(&a[..end], &b[..end])
+}
+
+/// Compute mean pooling of multiple vectors.
+///
+/// Result is written into `out`.
+pub fn pool_mean(vectors: &[&[f32]], out: &mut [f32]) {
+    if vectors.is_empty() {
+        return;
+    }
+    let n = vectors.len() as f32;
+    out.fill(0.0);
+    for v in vectors {
+        for (o, &vi) in out.iter_mut().zip(v.iter()) {
+            *o += vi;
+        }
+    }
+    for o in out.iter_mut() {
+        *o /= n;
+    }
+}
+
 /// L2 (Euclidean) distance: `sqrt(Σ(a[i] - b[i])²)`.
 ///
 /// # Example
@@ -288,6 +356,31 @@ pub fn metric_residual(s: &[f32], g: &[f32], eps: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_matryoshka_ranking_preservation() {
+        // Create a query and several documents
+        let query = [1.0, 0.5, 0.2, 0.1];
+        let doc1 = [0.9, 0.4, 0.1, 0.05]; // Closest
+        let doc2 = [0.1, 0.1, 0.1, 0.1];  // Farther
+        let doc3 = [-0.5, -0.2, 0.0, 0.0]; // Farthest
+
+        // Ranking at full dimension (4)
+        let sim1_full = cosine(&query, &doc1);
+        let sim2_full = cosine(&query, &doc2);
+        let sim3_full = cosine(&query, &doc3);
+        assert!(sim1_full > sim2_full);
+        assert!(sim2_full > sim3_full);
+
+        // Ranking at Matryoshka prefix (2)
+        let sim1_prefix = matryoshka_cosine(&query, &doc1, 2);
+        let sim2_prefix = matryoshka_cosine(&query, &doc2, 2);
+        let sim3_prefix = matryoshka_cosine(&query, &doc3, 2);
+        
+        // The relative order should be preserved
+        assert!(sim1_prefix > sim2_prefix);
+        assert!(sim2_prefix > sim3_prefix);
+    }
 
     #[test]
     fn test_dot_simd_threshold() {

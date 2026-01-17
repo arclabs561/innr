@@ -258,6 +258,68 @@ pub unsafe fn dot_avx2(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// AVX-512 masked intersection count for sorted indices.
+///
+/// Uses `_mm512_mask_cmpeq_epi32_mask` to find matching indices in two blocks.
+/// Base algorithm for high-performance sparse dot products.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn sparse_match_indices_avx512(
+    a_idx: &[u32],
+    b_idx: &[u32],
+) -> Vec<(usize, usize)> {
+    use std::arch::x86_64::{
+        _mm512_loadu_si512, _mm512_mask_cmpeq_epi32_mask, _mm512_set1_epi32,
+    };
+
+    let mut matches = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < a_idx.len() && j < b_idx.len() {
+        let remaining_a = a_idx.len() - i;
+        let remaining_b = b_idx.len() - j;
+
+        if remaining_a >= 16 && remaining_b >= 1 {
+            // Load 16 indices from a
+            let va = _mm512_loadu_si512(a_idx.as_ptr().add(i) as *const _);
+            
+            // For each element in b (or a block of b), check for matches in va
+            let target_b = b_idx[j];
+            let vb = _mm512_set1_epi32(target_b as i32);
+            
+            let mask = _mm512_mask_cmpeq_epi32_mask(0xFFFF, va, vb);
+            if mask != 0 {
+                let match_idx = mask.trailing_zeros() as usize;
+                matches.push((i + match_idx, j));
+                i += match_idx + 1;
+                j += 1;
+            } else {
+                if a_idx[i + 15] < target_b {
+                    i += 16;
+                } else {
+                    if target_b < a_idx[i] {
+                        j += 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            if a_idx[i] == b_idx[j] {
+                matches.push((i, j));
+                i += 1;
+                j += 1;
+            } else if a_idx[i] < b_idx[j] {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+    matches
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,4 +421,64 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_sparse_match_indices_avx512_basic() {
+        if !is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        let a = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35];
+        let b = [5, 15, 31, 35, 40];
+        let matches = unsafe { sparse_match_indices_avx512(&a, &b) };
+        assert_eq!(matches, vec![(2, 0), (7, 1), (15, 2), (17, 3)]);
+    }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_sorted_indices(max_len: usize, max_val: u32) -> impl Strategy<Value = Vec<u32>> {
+        prop::collection::vec(0..max_val, 0..max_len).prop_map(|mut v| {
+            v.sort_unstable();
+            v.dedup();
+            v
+        })
+    }
+
+    proptest! {
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_sparse_match_avx512_vs_scalar(
+            a in arb_sorted_indices(100, 1000),
+            b in arb_sorted_indices(100, 1000)
+        ) {
+            if !is_x86_feature_detected!("avx512f") {
+                return Ok(());
+            }
+            
+            let actual = unsafe { sparse_match_indices_avx512(&a, &b) };
+            
+            // Scalar reference implementation
+            let mut expected = Vec::new();
+            let mut i = 0;
+            let mut j = 0;
+            while i < a.len() && j < b.len() {
+                if a[i] == b[j] {
+                    expected.push((i, j));
+                    i += 1;
+                    j += 1;
+                } else if a[i] < b[j] {
+                    i += 1;
+                } else {
+                    j += 1;
+                }
+            }
+            
+            prop_assert_eq!(actual, expected);
+        }
+    }
+}
+

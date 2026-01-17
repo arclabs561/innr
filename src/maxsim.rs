@@ -43,9 +43,6 @@ use crate::dense::{cosine, dot};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::arch;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-use crate::MIN_DIM_SIMD;
-
 /// MaxSim: sum over query tokens of max dot product with any doc token.
 ///
 /// # Arguments

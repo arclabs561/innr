@@ -66,6 +66,7 @@
 
 mod arch;
 pub mod dense;
+pub mod metric;
 
 /// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
 pub mod fast_math;
@@ -80,7 +81,10 @@ mod sparse;
 mod maxsim;
 
 // Re-export core operations
-pub use dense::{cosine, dot, dot_portable, l2_distance, l2_distance_squared, norm};
+pub use dense::{cosine, dot, dot_portable, l1_distance, l2_distance, l2_distance_squared, norm};
+
+// Re-export metric trait surfaces (interfaces only).
+pub use metric::{Quasimetric, SymmetricMetric};
 
 // Re-export fast math (rsqrt-based approximations)
 pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
@@ -107,6 +111,12 @@ pub const MIN_DIM_SIMD: usize = 16;
 ///
 /// Used by [`cosine`] to avoid division by zero.
 pub const NORM_EPSILON: f32 = 1e-9;
+
+/// Cross-lingual alignment constant for L1-stable center mapping.
+/// 
+/// Research indicates that L1 (Manhattan) distance provides better stability
+/// for aligning box centers across multilingual latent spaces than L2.
+pub const L1_ALIGNMENT_EPSILON: f32 = 1e-4;
 
 #[cfg(test)]
 mod tests {
@@ -165,5 +175,13 @@ mod tests {
     fn test_l2_distance_same_point() {
         let a = [1.0_f32, 2.0, 3.0];
         assert!(l2_distance(&a, &a) < 1e-9);
+    }
+
+    #[test]
+    fn test_l1_distance() {
+        let a = [1.0_f32, 2.0, 3.0];
+        let b = [4.0_f32, 0.0, 1.0];
+        // |1-4| + |2-0| + |3-1| = 3 + 2 + 2 = 7
+        assert!((l1_distance(&a, &b) - 7.0).abs() < 1e-6);
     }
 }

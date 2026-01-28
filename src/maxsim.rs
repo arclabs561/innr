@@ -93,8 +93,14 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
 
     // Ensure all vectors have same dimension
     let dim = query_tokens[0].len();
-    debug_assert!(query_tokens.iter().all(|t| t.len() == dim));
-    debug_assert!(doc_tokens.iter().all(|t| t.len() == dim));
+    debug_assert!(
+        query_tokens.iter().all(|t| t.len() == dim),
+        "dimension mismatch (query)"
+    );
+    debug_assert!(
+        doc_tokens.iter().all(|t| t.len() == dim),
+        "dimension mismatch (doc)"
+    );
 
     #[cfg(target_arch = "x86_64")]
     {

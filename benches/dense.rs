@@ -6,7 +6,7 @@ use rand::prelude::*;
 
 fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = StdRng::seed_from_u64(42);
-    (0..n).map(|_| rng.gen_range(-1.0..1.0)).collect()
+    (0..n).map(|_| rng.random_range(-1.0..1.0)).collect()
 }
 
 fn bench_dot(c: &mut Criterion) {

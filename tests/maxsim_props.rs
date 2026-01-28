@@ -1,4 +1,8 @@
-#[cfg(all(test, any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(all(
+    test,
+    feature = "maxsim",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
 mod maxsim_simd_props {
     use innr::dense::dot;
     use innr::maxsim;

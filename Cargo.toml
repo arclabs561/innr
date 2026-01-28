@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/arclabs561/innr"
 homepage = "https://github.com/arclabs561/innr"
 documentation = "https://docs.rs/innr"
-keywords = ["simd", "vector", "similarity", "dot-product", "cosine", "matryoshka", "clifford"]
+keywords = ["simd", "vector", "similarity", "dot-product", "cosine"]
 categories = ["algorithms", "science"]
 
 [features]

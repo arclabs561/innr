@@ -30,4 +30,3 @@ pub trait Quasimetric<T> {
     /// Compute the directed distance from `source` to `target`.
     fn reachability(&self, source: &[T], target: &[T]) -> T;
 }
-

@@ -282,7 +282,7 @@ proptest! {
 #[test]
 fn test_dot_at_simd_boundaries() {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Test sizes that are: exact SIMD width, SIMD width - 1, SIMD width + 1
     // AVX-512: 16 floats, AVX2: 8 floats, NEON: 4 floats
@@ -292,8 +292,8 @@ fn test_dot_at_simd_boundaries() {
     ];
 
     for &size in &sizes {
-        let a: Vec<f32> = (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect();
-        let b: Vec<f32> = (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect();
+        let a: Vec<f32> = (0..size).map(|_| rng.random_range(-10.0..10.0)).collect();
+        let b: Vec<f32> = (0..size).map(|_| rng.random_range(-10.0..10.0)).collect();
 
         let result = innr::dot(&a, &b);
         let expected = dot_reference(&a, &b);
@@ -313,7 +313,7 @@ fn test_dot_at_simd_boundaries() {
 #[test]
 fn test_l2_sq_at_simd_boundaries() {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let sizes = [
         1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 23, 24, 25, 31, 32, 33, 47, 48, 49, 63, 64, 65, 127, 128,
@@ -321,8 +321,8 @@ fn test_l2_sq_at_simd_boundaries() {
     ];
 
     for &size in &sizes {
-        let a: Vec<f32> = (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect();
-        let b: Vec<f32> = (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect();
+        let a: Vec<f32> = (0..size).map(|_| rng.random_range(-10.0..10.0)).collect();
+        let b: Vec<f32> = (0..size).map(|_| rng.random_range(-10.0..10.0)).collect();
 
         let result = innr::l2_distance_squared(&a, &b);
         let expected = l2_sq_reference(&a, &b);

@@ -14,7 +14,7 @@ fn random_sparse(nnz: usize, vocab_size: u32) -> (Vec<u32>, Vec<f32>) {
     indices.sort_unstable();
 
     // Generate values
-    let values: Vec<f32> = (0..nnz).map(|_| rng.gen_range(-1.0..1.0)).collect();
+    let values: Vec<f32> = (0..nnz).map(|_| rng.random_range(-1.0..1.0)).collect();
 
     (indices, values)
 }

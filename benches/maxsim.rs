@@ -7,7 +7,7 @@ use rand::prelude::*;
 fn random_tokens(num_tokens: usize, dim: usize) -> Vec<Vec<f32>> {
     let mut rng = StdRng::seed_from_u64(42);
     (0..num_tokens)
-        .map(|_| (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect())
+        .map(|_| (0..dim).map(|_| rng.random_range(-1.0..1.0)).collect())
         .collect()
 }
 

@@ -109,12 +109,13 @@ pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
 /// Compute Jaccard similarity: `|A ∩ B| / |A ∪ B|`.
 pub fn binary_jaccard(a: &PackedBinary, b: &PackedBinary) -> f32 {
     let intersection = binary_dot(a, b);
-    let union = a.data
+    let union = a
+        .data
         .iter()
         .zip(b.data.iter())
         .map(|(&wa, &wb)| (wa | wb).count_ones())
         .sum::<u32>();
-    
+
     if union == 0 {
         1.0
     } else {
@@ -130,16 +131,16 @@ mod tests {
     fn test_binary_ops() {
         let mut a = PackedBinary::zeros(4);
         let mut b = PackedBinary::zeros(4);
-        
+
         a.set(0, true);
         a.set(1, true);
-        
+
         b.set(1, true);
         b.set(2, true);
-        
+
         // a: 1100, b: 0110
         assert_eq!(binary_hamming(&a, &b), 2); // indices 0 and 2 differ
-        assert_eq!(binary_dot(&a, &b), 1);    // only index 1 matches
-        assert!((binary_jaccard(&a, &b) - 1.0/3.0).abs() < 1e-6);
+        assert_eq!(binary_dot(&a, &b), 1); // only index 1 matches
+        assert!((binary_jaccard(&a, &b) - 1.0 / 3.0).abs() < 1e-6);
     }
 }

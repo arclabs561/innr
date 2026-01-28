@@ -5,7 +5,7 @@
 //! Ternary excels at: memory compression, fast similarity, deduplication
 //! Ternary struggles with: high-recall nearest neighbor search
 //!
-//! # Tekne Stack Context
+//! # Mathematical Foundation Context
 //!
 //! `innr` provides low-level SIMD primitives. Higher-level crates build on these:
 //!

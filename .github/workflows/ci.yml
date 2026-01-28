@@ -18,7 +18,11 @@ env:
 # See: https://cryspen.com/post/specify-rust-simd/
 
 jobs:
-  # Primary test suite on x86 (AVX2/AVX-512 available)
+  # Primary test suite on x86.
+  #
+  # Note: GitHub-hosted runners typically have AVX2, but AVX-512 availability is NOT guaranteed.
+  # We therefore (a) run normal tests natively, and (b) add a compile-only AVX-512 check to
+  # ensure the AVX-512 codepaths still build.
   test-x86:
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +53,20 @@ jobs:
       - name: Numerical edge cases
         run: cargo test --test numerical_edge_cases --all-features
 
+  # Compile-only AVX-512 build (no execution).
+  #
+  # This catches bitrot in AVX-512-specialized code without requiring AVX-512 hardware.
+  compile-avx512:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-Dwarnings -C target-feature=+avx512f"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile tests (AVX-512)
+        run: cargo test --all-features --no-run
+
   # ARM native testing (M1/M2 NEON)
   test-arm:
     runs-on: macos-latest
@@ -64,9 +82,7 @@ jobs:
         run: cargo test --all-features
 
       - name: SIMD correctness (NEON)
-        run: |
-          cargo run --release --example 01_basic_ops 2>&1 | tee output.txt
-          grep "dot(a, b) = 20" output.txt
+        run: cargo test simd_correctness --all-features
 
   # Cross-compilation check (build only, no execution)
   cross-compile:

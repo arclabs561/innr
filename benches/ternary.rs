@@ -9,7 +9,7 @@ use rand::prelude::*;
 
 fn random_vec(n: usize) -> Vec<f32> {
     let mut rng = StdRng::seed_from_u64(42);
-    (0..n).map(|_| rng.gen_range(-1.0..1.0)).collect()
+    (0..n).map(|_| rng.random_range(-1.0..1.0)).collect()
 }
 
 /// Benchmark encoding f32 vectors to ternary
@@ -97,7 +97,7 @@ fn bench_batch(c: &mut Criterion) {
     let docs: Vec<PackedTernary> = (0..num_docs)
         .map(|i| {
             let mut rng = StdRng::seed_from_u64(i as u64);
-            let vec: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+            let vec: Vec<f32> = (0..dim).map(|_| rng.random_range(-1.0..1.0)).collect();
             encode_ternary(&vec, 0.3)
         })
         .collect();
@@ -118,7 +118,7 @@ fn bench_batch(c: &mut Criterion) {
     let docs_f32: Vec<Vec<f32>> = (0..num_docs)
         .map(|i| {
             let mut rng = StdRng::seed_from_u64(i as u64);
-            (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect()
+            (0..dim).map(|_| rng.random_range(-1.0..1.0)).collect()
         })
         .collect();
 

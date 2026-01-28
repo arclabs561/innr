@@ -45,18 +45,15 @@ impl Rotor2D {
         // But we implement it via the geometric product for rigor.
         let x = v[0];
         let y = v[1];
-        
+
         // R = s + b*e12
         // R* = s - b*e12
         // v' = (s + b*e12) (x*e1 + y*e2) (s - b*e12)
         // ... simplifies to:
         let cos_theta = self.s * self.s - self.b * self.b;
         let sin_theta = 2.0 * self.s * self.b;
-        
-        [
-            x * cos_theta - y * sin_theta,
-            x * sin_theta + y * cos_theta
-        ]
+
+        [x * cos_theta - y * sin_theta, x * sin_theta + y * cos_theta]
     }
 }
 
@@ -85,7 +82,7 @@ mod tests {
         let r = Rotor2D::from_angle(std::f32::consts::FRAC_PI_2); // 90 degrees
         let v = [1.0, 0.0];
         let v_rot = r.rotate(v);
-        
+
         assert!((v_rot[0] - 0.0).abs() < 1e-6);
         assert!((v_rot[1] - 1.0).abs() < 1e-6);
     }
@@ -95,8 +92,8 @@ mod tests {
         let a = [1.0, 0.0];
         let b = [0.0, 1.0];
         let (s, b_part) = geometric_product_2d(a, b);
-        
-        assert_eq!(s, 0.0);      // Orthogonal
+
+        assert_eq!(s, 0.0); // Orthogonal
         assert_eq!(b_part, 1.0); // Full wedge
     }
 }

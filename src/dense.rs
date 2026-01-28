@@ -268,10 +268,7 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 #[must_use]
 pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "l1_distance: dimension mismatch");
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).abs())
-        .sum()
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
 }
 
 /// Squared L2 distance: `Σ(a[i] - b[i])²`.
@@ -318,7 +315,7 @@ pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
 }
 
 /// Clifford/Geometric Algebra Product (Foundation for 2026 Rotors).
-/// 
+///
 /// Computes the outer product part of the Clifford product for small bivectors.
 #[inline]
 pub fn geometric_outer_product(a: &[f32], b: &[f32]) -> Vec<f32> {
@@ -362,7 +359,7 @@ mod tests {
         // Create a query and several documents
         let query = [1.0, 0.5, 0.2, 0.1];
         let doc1 = [0.9, 0.4, 0.1, 0.05]; // Closest
-        let doc2 = [0.1, 0.1, 0.1, 0.1];  // Farther
+        let doc2 = [0.1, 0.1, 0.1, 0.1]; // Farther
         let doc3 = [-0.5, -0.2, 0.0, 0.0]; // Farthest
 
         // Ranking at full dimension (4)
@@ -376,7 +373,7 @@ mod tests {
         let sim1_prefix = matryoshka_cosine(&query, &doc1, 2);
         let sim2_prefix = matryoshka_cosine(&query, &doc2, 2);
         let sim3_prefix = matryoshka_cosine(&query, &doc3, 2);
-        
+
         // The relative order should be preserved
         assert!(sim1_prefix > sim2_prefix);
         assert!(sim2_prefix > sim3_prefix);

@@ -1,8 +1,17 @@
 # innr
 
+[![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
+
+
 SIMD-accelerated vector similarity primitives.
 
 Dual-licensed under MIT or Apache-2.0.
+
+## Why this exists
+
+`innr` is the dependency you reach for when you need **fast, well-tested vector math** without
+pulling in a full ANN index or ML framework. It is designed to sit under crates like `jin`,
+retrieval pipelines, and evaluation tooling.
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -41,6 +50,12 @@ Vectors < 16 dimensions use portable code.
 - `sparse` — sparse vector operations
 - `maxsim` — ColBERT late interaction scoring
 - `full` — all features
+
+## Best starting points
+
+- **Cosine / dot / norm**: `cosine`, `dot`, `norm`
+- **Distances**: `l2_distance`
+- **When using cosine**: normalize once (or use an index that expects normalized vectors)
 
 ## Performance
 

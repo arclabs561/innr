@@ -2,7 +2,6 @@
 
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
 
-
 SIMD-accelerated vector similarity primitives.
 
 Dual-licensed under MIT or Apache-2.0.
@@ -12,6 +11,13 @@ Dual-licensed under MIT or Apache-2.0.
 `innr` is the dependency you reach for when you need **fast, well-tested vector math** without
 pulling in a full ANN index or ML framework. It is designed to sit under crates like `jin`,
 retrieval pipelines, and evaluation tooling.
+
+## Quickstart
+
+```toml
+[dependencies]
+innr = "0.1.0"
+```
 
 ```rust
 use innr::{dot, cosine, norm};

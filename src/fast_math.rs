@@ -35,7 +35,14 @@ use crate::MIN_DIM_SIMD;
 ///
 /// # Safety Note
 ///
-/// Input must be positive. Zero or negative inputs produce garbage.
+/// Input must be positive. Zero or negative inputs return 0.0.
+///
+/// ```
+/// use innr::fast_rsqrt;
+///
+/// let r = fast_rsqrt(4.0);
+/// assert!((r - 0.5).abs() < 1e-3);  // 1/sqrt(4) = 0.5
+/// ```
 #[inline]
 pub fn fast_rsqrt(x: f32) -> f32 {
     if x <= 0.0 {

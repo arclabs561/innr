@@ -73,7 +73,17 @@ impl PackedBinary {
 
 /// Encode f32 slice as packed binary.
 ///
-/// Values above `threshold` (default 0.0) become 1, others become 0.
+/// Values above `threshold` become 1, others become 0.
+///
+/// ```
+/// use innr::binary::encode_binary;
+///
+/// let v = [0.5_f32, -0.1, 0.9, 0.0];
+/// let packed = encode_binary(&v, 0.0);
+/// assert!(packed.get(0));   // 0.5 > 0.0
+/// assert!(!packed.get(1));  // -0.1 <= 0.0
+/// assert!(packed.get(2));   // 0.9 > 0.0
+/// ```
 pub fn encode_binary(values: &[f32], threshold: f32) -> PackedBinary {
     let mut result = PackedBinary::zeros(values.len());
     for (i, &v) in values.iter().enumerate() {
@@ -85,6 +95,14 @@ pub fn encode_binary(values: &[f32], threshold: f32) -> PackedBinary {
 }
 
 /// Compute Hamming distance between two binary vectors.
+///
+/// ```
+/// use innr::binary::{encode_binary, binary_hamming};
+///
+/// let a = encode_binary(&[1.0, -1.0, 1.0, -1.0], 0.0);
+/// let b = encode_binary(&[1.0, 1.0, -1.0, -1.0], 0.0);
+/// assert_eq!(binary_hamming(&a, &b), 2); // positions 1 and 2 differ
+/// ```
 #[inline]
 pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
     debug_assert_eq!(a.dimension, b.dimension);
@@ -96,6 +114,14 @@ pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
 }
 
 /// Compute binary dot product (intersection count).
+///
+/// ```
+/// use innr::binary::{encode_binary, binary_dot};
+///
+/// let a = encode_binary(&[1.0, -1.0, 1.0, -1.0], 0.0);
+/// let b = encode_binary(&[1.0, 1.0, -1.0, -1.0], 0.0);
+/// assert_eq!(binary_dot(&a, &b), 1); // only position 0 is 1 in both
+/// ```
 #[inline]
 pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
     debug_assert_eq!(a.dimension, b.dimension);
@@ -106,7 +132,17 @@ pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
         .sum()
 }
 
-/// Compute Jaccard similarity: `|A ∩ B| / |A ∪ B|`.
+/// Compute Jaccard similarity: `|A intersection B| / `|A union B|`.
+///
+/// ```
+/// use innr::binary::{encode_binary, binary_jaccard};
+///
+/// let a = encode_binary(&[1.0, -1.0, 1.0, -1.0], 0.0);
+/// let b = encode_binary(&[1.0, 1.0, -1.0, -1.0], 0.0);
+/// // intersection=1, union=3 -> jaccard = 1/3
+/// let j = binary_jaccard(&a, &b);
+/// assert!((j - 1.0 / 3.0).abs() < 1e-6);
+/// ```
 pub fn binary_jaccard(a: &PackedBinary, b: &PackedBinary) -> f32 {
     let intersection = binary_dot(a, b);
     let union = a

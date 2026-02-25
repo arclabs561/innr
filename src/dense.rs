@@ -180,6 +180,17 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// - 0.5: Orthogonal
 /// - 1: Opposite direction
 ///
+/// # Example
+///
+/// ```
+/// use innr::angular_distance;
+///
+/// let a = [1.0_f32, 0.0];
+/// let b = [0.0_f32, 1.0];
+/// // Orthogonal vectors -> angular distance = 0.5
+/// assert!((angular_distance(&a, &b) - 0.5).abs() < 1e-5);
+/// ```
+///
 /// # References
 /// - [Angular distance](https://en.wikipedia.org/wiki/Cosine_similarity#Angular_distance_and_similarity)
 #[inline]
@@ -651,7 +662,7 @@ mod proptests {
         fn cosine_range((dim, a, b) in dim_and_two_nonzero_vecs()) {
             let c = cosine(&a, &b);
             prop_assert!(
-                c >= -1.0 - 1e-5 && c <= 1.0 + 1e-5,
+                (-1.0 - 1e-5..=1.0 + 1e-5).contains(&c),
                 "cosine out of range: {c}, dim={dim}"
             );
         }

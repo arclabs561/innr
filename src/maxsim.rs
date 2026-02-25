@@ -10,7 +10,7 @@
 //! as a middle ground between:
 //!
 //! - **Bi-encoders**: Fast (single vector per doc), but limited expressiveness
-//! - **Cross-encoders**: Expressive (full attention), but O(|Q| * |D|) per pair
+//! - **Cross-encoders**: Expressive (full attention), but O(|Q| x |D|) per pair
 //!
 //! Late interaction keeps token-level representations (like cross-encoders)
 //! but uses simple max-pool aggregation (fast like bi-encoders).
@@ -56,7 +56,7 @@ use crate::arch;
 ///
 /// # Complexity
 ///
-/// - Time: O(|Q| * |D| * dim)
+/// - Time: O(|Q| x |D| x dim)
 /// - Space: O(1)
 ///
 /// # SIMD Optimization

@@ -32,7 +32,7 @@
 //! in high-dimensional spaces where SIMD acceleration is essential.
 //!
 //! ColBERT's MaxSim (Khattab & Zaharia, 2020) extends this to token-level late
-//! interaction, requiring O(|Q| * |D|) inner products per query-document pair.
+//! interaction, requiring O(|Q| x |D|) inner products per query-document pair.
 //!
 //! # Example
 //!

@@ -170,10 +170,10 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// Angular distance: `acos(cosine_similarity) / π`.
 ///
 /// Unlike cosine similarity, angular distance is a **true metric**:
-/// 1. $d(x, y) \ge 0$
-/// 2. $d(x, y) = 0 \iff x = y$
-/// 3. $d(x, y) = d(y, x)$
-/// 4. $d(x, z) \le d(x, y) + d(y, z)$ (Triangle Inequality)
+/// 1. d(x, y) >= 0
+/// 2. d(x, y) = 0 iff x = y
+/// 3. d(x, y) = d(y, x)
+/// 4. d(x, z) <= d(x, y) + d(y, z) (Triangle Inequality)
 ///
 /// Range: `[0, 1]`.
 /// - 0: Identical direction

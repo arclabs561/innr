@@ -65,6 +65,10 @@ Vectors < 16 dimensions use portable code.
 
 ## Performance
 
+![Benchmark throughput](docs/bench_throughput.png)
+
+*Apple Silicon (NEON). Run `cargo bench` to reproduce on your hardware.*
+
 For maximum performance, build with native CPU features:
 
 ```bash

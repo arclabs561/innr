@@ -10,6 +10,7 @@ homepage = "https://github.com/arclabs561/innr"
 documentation = "https://docs.rs/innr"
 keywords = ["simd", "vector", "similarity", "dot-product", "cosine"]
 categories = ["algorithms", "science"]
+publish = true
 
 [features]
 default = []
@@ -49,3 +50,11 @@ harness = false
 [[bench]]
 name = "ternary"
 harness = false
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+perf = { level = "warn", priority = -1 }

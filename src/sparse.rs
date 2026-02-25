@@ -215,6 +215,101 @@ mod tests {
         let doc: Vec<(&[u32], &[f32])> = vec![];
         assert_eq!(sparse_maxsim(&query, &doc), 0.0);
     }
+
+    // --- Additional coverage ---
+
+    #[test]
+    fn test_sparse_dot_single_element_overlap() {
+        let a_idx = [42u32];
+        let a_val = [7.0f32];
+        let b_idx = [42u32];
+        let b_val = [3.0f32];
+        let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+        assert!((result - 21.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_dot_single_element_no_overlap() {
+        let a_idx = [10u32];
+        let a_val = [5.0f32];
+        let b_idx = [20u32];
+        let b_val = [5.0f32];
+        assert_eq!(sparse_dot(&a_idx, &a_val, &b_idx, &b_val), 0.0);
+    }
+
+    #[test]
+    fn test_sparse_dot_large_index_values() {
+        // Indices near u32::MAX to test that the merge-join handles large values.
+        let a_idx = [0u32, 1_000_000, u32::MAX - 1];
+        let a_val = [1.0f32, 2.0, 3.0];
+        let b_idx = [500_000u32, 1_000_000, u32::MAX - 1];
+        let b_val = [9.0f32, 4.0, 5.0];
+        // Overlap at 1_000_000 (2*4=8) and u32::MAX-1 (3*5=15) => 23
+        let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+        assert!((result - 23.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_dot_both_empty() {
+        let empty_idx: [u32; 0] = [];
+        let empty_val: [f32; 0] = [];
+        assert_eq!(sparse_dot(&empty_idx, &empty_val, &empty_idx, &empty_val), 0.0);
+    }
+
+    #[test]
+    fn test_sparse_dot_negative_values() {
+        let a_idx = [0u32, 1, 2];
+        let a_val = [-1.0f32, 2.0, -3.0];
+        let b_idx = [0u32, 1, 2];
+        let b_val = [4.0f32, -5.0, 6.0];
+        // (-1*4) + (2*-5) + (-3*6) = -4 + -10 + -18 = -32
+        let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+        assert!((result - (-32.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_dot_portable_matches_dispatch() {
+        let a_idx = [0u32, 3, 7, 15];
+        let a_val = [1.5f32, 2.5, 3.5, 4.5];
+        let b_idx = [3u32, 7, 20];
+        let b_val = [0.5f32, 1.0, 2.0];
+        // Overlap at 3 (2.5*0.5=1.25) and 7 (3.5*1.0=3.5) => 4.75
+        let dispatched = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
+        let portable = sparse_dot_portable(&a_idx, &a_val, &b_idx, &b_val);
+        assert!((dispatched - portable).abs() < 1e-6);
+        assert!((portable - 4.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_maxsim_single_token_each() {
+        // One query token, one doc token with overlapping indices.
+        let q_idx = [0u32, 5];
+        let q_val = [1.0f32, 2.0];
+        let d_idx = [5u32, 10];
+        let d_val = [3.0f32, 4.0];
+
+        let query = vec![(&q_idx[..], &q_val[..])];
+        let doc = vec![(&d_idx[..], &d_val[..])];
+
+        // Only overlap at 5: 2.0 * 3.0 = 6.0
+        let result = sparse_maxsim(&query, &doc);
+        assert!((result - 6.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_maxsim_no_overlap_returns_zero_per_query() {
+        // All query-doc pairs are disjoint => each max is 0, sum is 0.
+        let q_idx = [0u32, 1];
+        let q_val = [1.0f32, 1.0];
+        let d_idx = [100u32, 200];
+        let d_val = [1.0f32, 1.0];
+
+        let query = vec![(&q_idx[..], &q_val[..])];
+        let doc = vec![(&d_idx[..], &d_val[..])];
+
+        let result = sparse_maxsim(&query, &doc);
+        assert_eq!(result, 0.0);
+    }
 }
 
 #[cfg(test)]

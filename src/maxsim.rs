@@ -252,4 +252,110 @@ mod tests {
         // cosine([2,0], [3,0]) = (2*3) / (2 * 3) = 1.0
         assert!((cos_score - 1.0).abs() < 1e-6);
     }
+
+    // --- Additional coverage ---
+
+    #[test]
+    fn test_maxsim_single_query_single_doc() {
+        let q = [1.0f32, 2.0, 3.0];
+        let d = [4.0f32, 5.0, 6.0];
+        let query: &[&[f32]] = &[&q];
+        let doc: &[&[f32]] = &[&d];
+        // dot = 1*4 + 2*5 + 3*6 = 32
+        let score = maxsim(query, doc);
+        assert!((score - 32.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_multiple_query_multiple_doc() {
+        // 3 query tokens, 2 doc tokens, dim=3
+        let q1 = [1.0f32, 0.0, 0.0];
+        let q2 = [0.0f32, 1.0, 0.0];
+        let q3 = [0.0f32, 0.0, 1.0];
+        let d1 = [0.5f32, 0.3, 0.0];
+        let d2 = [0.0f32, 0.7, 0.9];
+
+        let query: &[&[f32]] = &[&q1, &q2, &q3];
+        let doc: &[&[f32]] = &[&d1, &d2];
+
+        // q1 vs d1: 0.5, q1 vs d2: 0.0 => max = 0.5
+        // q2 vs d1: 0.3, q2 vs d2: 0.7 => max = 0.7
+        // q3 vs d1: 0.0, q3 vs d2: 0.9 => max = 0.9
+        // total = 0.5 + 0.7 + 0.9 = 2.1
+        let score = maxsim(query, doc);
+        assert!((score - 2.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_identical_embeddings() {
+        // All tokens are the same unit vector; every dot product is 1.0.
+        let v = [1.0f32, 0.0, 0.0];
+        let query: &[&[f32]] = &[&v, &v, &v];
+        let doc: &[&[f32]] = &[&v, &v];
+        // Each query token's max dot is 1.0; sum = 3.0
+        let score = maxsim(query, doc);
+        assert!((score - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_orthogonal_embeddings() {
+        // Query and doc tokens are all pairwise orthogonal.
+        let q1 = [1.0f32, 0.0, 0.0, 0.0];
+        let q2 = [0.0f32, 1.0, 0.0, 0.0];
+        let d1 = [0.0f32, 0.0, 1.0, 0.0];
+        let d2 = [0.0f32, 0.0, 0.0, 1.0];
+
+        let query: &[&[f32]] = &[&q1, &q2];
+        let doc: &[&[f32]] = &[&d1, &d2];
+
+        // Every query-doc dot product is 0; max per query token is 0.
+        let score = maxsim(query, doc);
+        assert!(score.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_cosine_orthogonal() {
+        let q1 = [1.0f32, 0.0];
+        let d1 = [0.0f32, 1.0];
+
+        let query: &[&[f32]] = &[&q1];
+        let doc: &[&[f32]] = &[&d1];
+
+        let score = maxsim_cosine(query, doc);
+        assert!(score.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_cosine_identical() {
+        let v = [3.0f32, 4.0]; // not normalized
+        let query: &[&[f32]] = &[&v, &v];
+        let doc: &[&[f32]] = &[&v];
+        // cosine(v, v) = 1.0 for each query token; sum = 2.0
+        let score = maxsim_cosine(query, doc);
+        assert!((score - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_maxsim_cosine_empty() {
+        let v = [1.0f32, 0.0];
+        let query: &[&[f32]] = &[&v];
+        let empty: &[&[f32]] = &[];
+        assert_eq!(maxsim_cosine(query, empty), 0.0);
+        assert_eq!(maxsim_cosine(empty, query), 0.0);
+    }
+
+    #[test]
+    fn test_maxsim_higher_dim() {
+        // 8-dim vectors to exercise more of the accumulator logic.
+        let q1 = [1.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let d1 = [0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let d2 = [0.5f32, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        let query: &[&[f32]] = &[&q1];
+        let doc: &[&[f32]] = &[&d1, &d2];
+
+        // q1 vs d1 = 0.0, q1 vs d2 = 0.5 => max = 0.5
+        let score = maxsim(query, doc);
+        assert!((score - 0.5).abs() < 1e-6);
+    }
 }

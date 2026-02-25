@@ -51,6 +51,10 @@ harness = false
 name = "ternary"
 harness = false
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lints.rust]
 missing_docs = "warn"
 unsafe_code = "warn"

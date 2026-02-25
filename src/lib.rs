@@ -61,6 +61,7 @@
 //! - Mikolov et al. (2013). "Efficient Estimation of Word Representations" (Word2Vec)
 //! - Khattab & Zaharia (2020). "ColBERT: Efficient and Effective Passage Search"
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
@@ -77,9 +78,11 @@ pub mod fast_math;
 pub mod batch;
 
 #[cfg(feature = "sparse")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sparse")))]
 mod sparse;
 
 #[cfg(feature = "maxsim")]
+#[cfg_attr(docsrs, doc(cfg(feature = "maxsim")))]
 mod maxsim;
 
 // Re-export core operations
@@ -101,9 +104,11 @@ pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_pr
 pub mod ternary;
 
 #[cfg(feature = "sparse")]
+#[cfg_attr(docsrs, doc(cfg(feature = "sparse")))]
 pub use sparse::{sparse_dot, sparse_dot_portable, sparse_maxsim};
 
 #[cfg(feature = "maxsim")]
+#[cfg_attr(docsrs, doc(cfg(feature = "maxsim")))]
 pub use maxsim::{maxsim, maxsim_cosine};
 
 /// Minimum vector dimension for SIMD to be worthwhile.

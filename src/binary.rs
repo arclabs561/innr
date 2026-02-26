@@ -422,3 +422,109 @@ mod tests {
         assert!(packed.get(3)); // 1.5 > 0.5
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Dimensions that cross u64 word boundaries.
+    const DIMS: &[usize] = &[31, 32, 33, 63, 64, 65, 128];
+
+    /// Strategy: pick a dimension from DIMS, then generate a bool vec of that length.
+    fn arb_packed_binary() -> impl Strategy<Value = PackedBinary> {
+        prop::sample::select(DIMS).prop_flat_map(|dim| {
+            prop::collection::vec(any::<bool>(), dim).prop_map(move |bits| {
+                let mut pb = PackedBinary::zeros(dim);
+                for (i, &b) in bits.iter().enumerate() {
+                    pb.set(i, b);
+                }
+                pb
+            })
+        })
+    }
+
+    /// Strategy: pair of PackedBinary with the same dimension.
+    fn arb_packed_binary_pair() -> impl Strategy<Value = (PackedBinary, PackedBinary)> {
+        prop::sample::select(DIMS).prop_flat_map(|dim| {
+            let a = prop::collection::vec(any::<bool>(), dim).prop_map(move |bits| {
+                let mut pb = PackedBinary::zeros(dim);
+                for (i, &b) in bits.iter().enumerate() {
+                    pb.set(i, b);
+                }
+                pb
+            });
+            let b = prop::collection::vec(any::<bool>(), dim).prop_map(move |bits| {
+                let mut pb = PackedBinary::zeros(dim);
+                for (i, &b) in bits.iter().enumerate() {
+                    pb.set(i, b);
+                }
+                pb
+            });
+            (a, b)
+        })
+    }
+
+    proptest! {
+        // 1. Hamming symmetry: hamming(a, b) == hamming(b, a)
+        #[test]
+        fn proptest_hamming_symmetry((a, b) in arb_packed_binary_pair()) {
+            prop_assert_eq!(binary_hamming(&a, &b), binary_hamming(&b, &a));
+        }
+
+        // 2. Hamming self-distance is zero: hamming(a, a) == 0
+        #[test]
+        fn proptest_hamming_self_zero(a in arb_packed_binary()) {
+            prop_assert_eq!(binary_hamming(&a, &a), 0);
+        }
+
+        // 3. Hamming range: hamming(a, b) <= dimension
+        #[test]
+        fn proptest_hamming_range((a, b) in arb_packed_binary_pair()) {
+            let h = binary_hamming(&a, &b);
+            prop_assert!(h as usize <= a.dimension,
+                "hamming {} > dimension {}", h, a.dimension);
+        }
+
+        // 4. Jaccard range: jaccard(a, b) in [0.0, 1.0]
+        #[test]
+        fn proptest_jaccard_range((a, b) in arb_packed_binary_pair()) {
+            let j = binary_jaccard(&a, &b);
+            prop_assert!(j >= 0.0 && j <= 1.0,
+                "jaccard {} not in [0, 1]", j);
+        }
+
+        // 5. Jaccard self-similarity: jaccard(a, a) == 1.0 for non-zero vectors
+        #[test]
+        fn proptest_jaccard_self(a in arb_packed_binary()) {
+            let has_bits = a.data.iter().any(|&w| w != 0);
+            let j = binary_jaccard(&a, &a);
+            if has_bits {
+                prop_assert!((j - 1.0).abs() < 1e-6,
+                    "jaccard(a, a) = {} but expected 1.0 for non-zero vector", j);
+            } else {
+                // Convention: jaccard of two zero vectors is 1.0
+                prop_assert!((j - 1.0).abs() < 1e-6,
+                    "jaccard(zero, zero) = {} but expected 1.0", j);
+            }
+        }
+
+        // 6. Dot product commutativity: dot(a, b) == dot(b, a)
+        #[test]
+        fn proptest_dot_commutativity((a, b) in arb_packed_binary_pair()) {
+            prop_assert_eq!(binary_dot(&a, &b), binary_dot(&b, &a));
+        }
+
+        // 7. Encode deterministic: encode(v, t) == encode(v, t) for same inputs
+        #[test]
+        fn proptest_encode_deterministic(
+            dim in prop::sample::select(DIMS),
+            threshold in -10.0f32..10.0,
+        ) {
+            let values: Vec<f32> = (0..dim).map(|i| (i as f32 - dim as f32 / 2.0) * 0.1).collect();
+            let a = encode_binary(&values, threshold);
+            let b = encode_binary(&values, threshold);
+            prop_assert_eq!(a, b);
+        }
+    }
+}

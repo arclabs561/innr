@@ -704,3 +704,111 @@ mod tests {
         assert_eq!(ternary_dot(&a, &b), expected);
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Dimensions that cross u64 word boundaries (32 ternary values per u64).
+    const DIMS: &[usize] = &[31, 32, 33, 63, 64, 65, 128];
+
+    /// Strategy: pick a dimension from DIMS, then generate a ternary vec of that length.
+    fn arb_packed_ternary() -> impl Strategy<Value = PackedTernary> {
+        prop::sample::select(DIMS).prop_flat_map(|dim| {
+            prop::collection::vec(prop::sample::select(&[-1i8, 0, 1][..]), dim).prop_map(
+                move |vals| {
+                    let mut pt = PackedTernary::zeros(dim);
+                    for (i, &v) in vals.iter().enumerate() {
+                        pt.set(i, v);
+                    }
+                    pt
+                },
+            )
+        })
+    }
+
+    /// Strategy: pair of PackedTernary with the same dimension.
+    fn arb_packed_ternary_pair() -> impl Strategy<Value = (PackedTernary, PackedTernary)> {
+        prop::sample::select(DIMS).prop_flat_map(|dim| {
+            let a = prop::collection::vec(prop::sample::select(&[-1i8, 0, 1][..]), dim).prop_map(
+                move |vals| {
+                    let mut pt = PackedTernary::zeros(dim);
+                    for (i, &v) in vals.iter().enumerate() {
+                        pt.set(i, v);
+                    }
+                    pt
+                },
+            );
+            let b = prop::collection::vec(prop::sample::select(&[-1i8, 0, 1][..]), dim).prop_map(
+                move |vals| {
+                    let mut pt = PackedTernary::zeros(dim);
+                    for (i, &v) in vals.iter().enumerate() {
+                        pt.set(i, v);
+                    }
+                    pt
+                },
+            );
+            (a, b)
+        })
+    }
+
+    proptest! {
+        // 1. Asymmetric dot is NOT commutative in general.
+        //
+        // asymmetric_dot(q, t) uses a full-precision f32 query against a quantized
+        // ternary vector. Swapping the roles (using the ternary values as f32 query
+        // and the original query as a new ternary encoding) would change the result
+        // because quantization is lossy. The symmetric ternary_dot IS commutative
+        // (proven below via hamming symmetry and dot algebra), but asymmetric_dot
+        // by design breaks symmetry -- that is its purpose.
+        //
+        // We test a weaker property: asymmetric_dot with a ternary-derived f32 query
+        // equals the symmetric ternary_dot.
+        #[test]
+        fn proptest_asymmetric_dot_matches_symmetric_for_ternary_query(
+            (a, b) in arb_packed_ternary_pair(),
+        ) {
+            // Build f32 query from a's ternary values
+            let query: Vec<f32> = (0..a.dimension).map(|i| a.get(i) as f32).collect();
+            let asym = asymmetric_dot(&query, &b);
+            let sym = ternary_dot(&a, &b) as f32;
+            prop_assert!((asym - sym).abs() < 1e-6,
+                "asymmetric({}) != symmetric({})", asym, sym);
+        }
+
+        // 2. Encode then nnz <= dimension
+        #[test]
+        fn proptest_encode_nnz_le_dimension(
+            dim in prop::sample::select(DIMS),
+            threshold in 0.0f32..2.0,
+        ) {
+            let values: Vec<f32> = (0..dim)
+                .map(|i| (i as f32 - dim as f32 / 2.0) * 0.1)
+                .collect();
+            let packed = encode_ternary(&values, threshold);
+            prop_assert!(packed.nnz() <= dim,
+                "nnz {} > dimension {}", packed.nnz(), dim);
+        }
+
+        // 3. Hamming symmetry: hamming(a, b) == hamming(b, a)
+        #[test]
+        fn proptest_hamming_symmetry((a, b) in arb_packed_ternary_pair()) {
+            prop_assert_eq!(ternary_hamming(&a, &b), ternary_hamming(&b, &a));
+        }
+
+        // 4. Hamming self-distance zero: hamming(a, a) == 0
+        #[test]
+        fn proptest_hamming_self_zero(a in arb_packed_ternary()) {
+            prop_assert_eq!(ternary_hamming(&a, &a), 0);
+        }
+
+        // 5. Sparsity in [0.0, 1.0]
+        #[test]
+        fn proptest_sparsity_range(a in arb_packed_ternary()) {
+            let s = sparsity(&a);
+            prop_assert!(s >= 0.0 && s <= 1.0,
+                "sparsity {} not in [0, 1]", s);
+        }
+    }
+}

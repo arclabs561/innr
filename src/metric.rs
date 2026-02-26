@@ -14,6 +14,7 @@
 //! Note: Any "axiom checking" utilities (triangle inequality checks, projections, etc.)
 //! are better housed in higher layers where richer numeric bounds/deps are acceptable.
 //! This file stays small by design.
+
 /// A symmetric distance metric.
 ///
 /// This is an interface only; implementations decide their own numeric behavior.

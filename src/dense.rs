@@ -219,7 +219,7 @@ pub fn matryoshka_dot(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
     dot(&a[..end], &b[..end])
 }
 
-/// Matryoshka-optimized cosine similarity.
+/// Matryoshka-optimized cosine similarity on the first `prefix_len` dimensions.
 #[inline]
 #[must_use]
 pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {

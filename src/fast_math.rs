@@ -324,7 +324,9 @@ pub mod aarch64 {
     }
 }
 
-/// Dispatch to fastest available fast_cosine implementation.
+/// Dispatch to the fastest available `fast_cosine` implementation.
+///
+/// Selects AVX-512, AVX2+FMA, NEON, or portable based on runtime detection.
 #[inline]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]

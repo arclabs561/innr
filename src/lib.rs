@@ -66,9 +66,17 @@
 #![warn(clippy::all)]
 
 mod arch;
+
+/// Binary (1-bit) quantization: encode, Hamming distance, dot product, Jaccard.
 pub mod binary;
+
+/// Clifford algebra rotors for steerable embeddings (2D geometric product).
 pub mod clifford;
+
+/// Dense vector primitives: dot, cosine, norm, L2/L1 distance, matryoshka.
 pub mod dense;
+
+/// Metric and quasimetric trait interfaces (dependency-free).
 pub mod metric;
 
 /// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
@@ -77,10 +85,12 @@ pub mod fast_math;
 /// Batch vector operations with columnar (PDX-style) layout.
 pub mod batch;
 
+/// Sparse vector dot product via sorted-index merge join.
 #[cfg(feature = "sparse")]
 #[cfg_attr(docsrs, doc(cfg(feature = "sparse")))]
 mod sparse;
 
+/// ColBERT MaxSim late interaction scoring for multi-vector retrieval.
 #[cfg(feature = "maxsim")]
 #[cfg_attr(docsrs, doc(cfg(feature = "maxsim")))]
 mod maxsim;

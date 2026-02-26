@@ -8,7 +8,7 @@
 //!
 //! | ISA | Min dim | Typical speedup |
 //! |-----|---------|-----------------|
-//! | AVX-512 | 64 | 10-20x vs scalar |
+//! | AVX-512 | 64 | ~10-20x vs scalar (not yet benchmarked) |
 //! | AVX2+FMA | 16 | 5-10x vs scalar |
 //! | NEON | 16 | 4-8x vs scalar |
 //! | Portable | any | 1x (baseline) |
@@ -332,6 +332,11 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
 /// Bilinear product: `phi^T * psi / sqrt(d)`.
 ///
 /// Used in Dual Goal Representations for value estimation.
+///
+/// # References
+///
+/// - Borsa et al. (2018). "Universal Successor Features Approximators" (ICLR).
+/// - Barreto et al. (2017). "Successor Features for Transfer in Reinforcement Learning" (NeurIPS).
 #[inline]
 #[must_use]
 pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
@@ -342,9 +347,13 @@ pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
     dot(phi, psi) / (d as f32).sqrt()
 }
 
-/// Clifford/Geometric Algebra Product (Foundation for 2026 Rotors).
+/// Tensor (outer) product of two vectors (Foundation for 2026 Rotors).
 ///
-/// Computes the outer product part of the Clifford product for small bivectors.
+/// Computes the full tensor product: all pairs `a[i] * b[j]`, returned as a
+/// flat row-major vector of length `a.len() * b.len()`.
+///
+/// Note: this computes the full tensor product, not the antisymmetric exterior
+/// (wedge) product from Clifford/geometric algebra.
 #[inline]
 pub fn geometric_outer_product(a: &[f32], b: &[f32]) -> Vec<f32> {
     let mut res = Vec::with_capacity(a.len() * b.len());
@@ -360,6 +369,13 @@ pub fn geometric_outer_product(a: &[f32], b: &[f32]) -> Vec<f32> {
 ///
 /// Where `quasi(s, g) = max(0, Σ max(0, s_asym[i] - g_asym[i]))` or similar asymmetric part.
 /// This implementation assumes `s` and `g` are already split or handles the full vector.
+///
+/// Inspired by quasimetric learning literature.
+///
+/// # References
+///
+/// - Wang & Gupta (2023). "On the Optimal Recovery of Graph Signals" / MRN quasimetric formulation.
+/// - Liu et al. (2023). "Metric Residual Networks for Sample Efficient Goal-Conditioned RL" (ICML).
 #[inline]
 #[must_use]
 pub fn metric_residual(s: &[f32], g: &[f32], eps: f32) -> f32 {

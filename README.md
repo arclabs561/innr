@@ -18,7 +18,7 @@ retrieval pipelines, and evaluation tooling.
 
 ```toml
 [dependencies]
-innr = "0.1.0"
+innr = "0.1.1"
 ```
 
 ```rust

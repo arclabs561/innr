@@ -98,3 +98,13 @@ Generate flamegraphs (requires `cargo-flamegraph`):
 ```bash
 ./scripts/profile.sh dense
 ```
+
+## Tests
+
+```bash
+cargo test -p innr
+```
+
+## License
+
+Dual-licensed under MIT or Apache-2.0.

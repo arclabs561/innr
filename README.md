@@ -14,7 +14,7 @@ Dual-licensed under MIT or Apache-2.0.
 
 ```toml
 [dependencies]
-innr = "0.1.1"
+innr = "0.1.2"
 ```
 
 ```rust

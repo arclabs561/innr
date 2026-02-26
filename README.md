@@ -1,6 +1,8 @@
 # innr
 
+[![crates.io](https://img.shields.io/crates/v/innr.svg)](https://crates.io/crates/innr)
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
+[![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
 SIMD-accelerated vector similarity primitives.
 

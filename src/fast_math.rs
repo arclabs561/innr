@@ -461,6 +461,17 @@ pub mod aarch64 {
 /// Dispatch to the fastest available `fast_cosine` implementation.
 ///
 /// Selects AVX-512, AVX2+FMA, NEON, or portable based on runtime detection.
+///
+/// # Examples
+///
+/// ```
+/// use innr::fast_math::fast_cosine_dispatch;
+///
+/// let a = vec![1.0_f32, 0.0, 0.0];
+/// let b = vec![1.0_f32, 0.0, 0.0];
+/// let sim = fast_cosine_dispatch(&a, &b);
+/// assert!((sim - 1.0).abs() < 0.02); // approximate, within ~1%
+/// ```
 #[inline]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]

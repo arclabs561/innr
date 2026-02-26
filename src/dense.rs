@@ -218,6 +218,23 @@ pub fn angular_distance(a: &[f32], b: &[f32]) -> f32 {
 /// and the dimension axis (prefix truncation), yielding a grid of quality/cost
 /// tradeoffs from a single forward pass.
 ///
+/// # Examples
+///
+/// ```
+/// use innr::dense::{matryoshka_dot, dot};
+///
+/// let a = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0];
+/// let b = vec![5.0_f32, 4.0, 3.0, 2.0, 1.0];
+///
+/// // Use first 3 dimensions only (coarse, fast retrieval)
+/// let coarse = matryoshka_dot(&a, &b, 3);
+/// assert_eq!(coarse, dot(&a[..3], &b[..3]));
+///
+/// // Use all 5 dimensions (fine, precise re-ranking)
+/// let fine = matryoshka_dot(&a, &b, 5);
+/// assert_eq!(fine, dot(&a, &b));
+/// ```
+///
 /// # References
 ///
 /// - Kusupati et al. (2022). "Matryoshka Representation Learning" (NeurIPS) --
@@ -237,6 +254,19 @@ pub fn matryoshka_dot(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
 /// Matryoshka-optimized cosine similarity on the first `prefix_len` dimensions.
 ///
 /// See [`matryoshka_dot`] for background on prefix-truncatable embeddings.
+///
+/// # Examples
+///
+/// ```
+/// use innr::dense::{matryoshka_cosine, cosine};
+///
+/// let a = vec![1.0_f32, 0.0, 0.0, 1.0];
+/// let b = vec![0.0_f32, 1.0, 0.0, 0.0];
+///
+/// // Cosine on first 2 dims: orthogonal -> 0.0
+/// let sim_2d = matryoshka_cosine(&a, &b, 2);
+/// assert!((sim_2d - 0.0).abs() < 1e-6);
+/// ```
 #[inline]
 #[must_use]
 pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
@@ -247,6 +277,18 @@ pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
 /// Compute mean pooling of multiple vectors.
 ///
 /// Result is written into `out`.
+///
+/// # Examples
+///
+/// ```
+/// use innr::dense::pool_mean;
+///
+/// let v1 = [1.0_f32, 2.0, 3.0];
+/// let v2 = [3.0_f32, 2.0, 1.0];
+/// let mut out = [0.0_f32; 3];
+/// pool_mean(&[&v1, &v2], &mut out);
+/// assert_eq!(out, [2.0, 2.0, 2.0]);
+/// ```
 pub fn pool_mean(vectors: &[&[f32]], out: &mut [f32]) {
     if vectors.is_empty() {
         return;
@@ -337,6 +379,17 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// - Borsa et al. (2018). "Universal Successor Features Approximators" (ICLR).
 /// - Barreto et al. (2017). "Successor Features for Transfer in Reinforcement Learning" (NeurIPS).
+///
+/// # Examples
+///
+/// ```
+/// use innr::dense::bilinear;
+///
+/// let phi = vec![1.0_f32, 1.0, 1.0, 1.0];
+/// let psi = vec![2.0_f32, 2.0, 2.0, 2.0];
+/// // dot = 8.0, sqrt(4) = 2.0, result = 4.0
+/// assert!((bilinear(&phi, &psi) - 4.0).abs() < 1e-6);
+/// ```
 #[inline]
 #[must_use]
 pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {

@@ -203,15 +203,30 @@ pub fn angular_distance(a: &[f32], b: &[f32]) -> f32 {
 /// Matryoshka-optimized dot product for nested embeddings.
 ///
 /// Computes the dot product only on the first `prefix_len` dimensions.
-/// Latest embeddings (MRL) allow variable-length scoring for adaptive retrieval.
+/// MRL embeddings allow variable-length scoring for adaptive retrieval:
+/// index at full dimension for quality, re-rank with a short prefix for speed,
+/// or use a prefix as a first-stage filter before exact scoring.
 ///
 /// # Research Context
+///
 /// Matryoshka Representation Learning (MRL) optimizes representations by training
 /// a single high-dimensional vector such that its prefixes are explicitly supervised.
-/// This enables "train-once, deploy-everywhere" flexibility.
+/// This enables "train-once, deploy-everywhere" flexibility -- the same model
+/// checkpoint serves 64-dim mobile retrieval and 768-dim server-side ranking.
+///
+/// The 2D extension generalizes truncation to both the layer axis (early exit)
+/// and the dimension axis (prefix truncation), yielding a grid of quality/cost
+/// tradeoffs from a single forward pass.
 ///
 /// # References
-/// - Kusupati et al. (2022). "Matryoshka Representation Learning" (NeurIPS)
+///
+/// - Kusupati et al. (2022). "Matryoshka Representation Learning" (NeurIPS) --
+///   the foundational paper for prefix-truncatable embeddings; shows that
+///   explicit multi-granularity supervision preserves ranking quality at
+///   2-8x dimension reduction.
+/// - Li et al. (2024). "2D Matryoshka Sentence Embeddings" -- extends MRL
+///   to both layer and dimension axes, enabling joint early-exit and
+///   prefix-truncation from a single trained model.
 #[inline]
 #[must_use]
 pub fn matryoshka_dot(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
@@ -220,6 +235,8 @@ pub fn matryoshka_dot(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
 }
 
 /// Matryoshka-optimized cosine similarity on the first `prefix_len` dimensions.
+///
+/// See [`matryoshka_dot`] for background on prefix-truncatable embeddings.
 #[inline]
 #[must_use]
 pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {

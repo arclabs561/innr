@@ -1,55 +1,74 @@
 # Examples
 
-SIMD-accelerated vector operations for ML workloads.
+SIMD-accelerated vector similarity primitives for ML workloads.
 
 ## Quick Start
 
-| Example | What It Teaches |
-|---------|-----------------|
+| Example | What It Covers |
+|---------|----------------|
 | `01_basic_ops` | Dot, cosine, L2 with key identities |
-| `simd_benchmark` | Compare SIMD vs portable performance |
+| `fast_math_demo` | Newton-Raphson rsqrt, SIMD vs portable dispatch, search scenario |
 
 ```sh
 cargo run --example 01_basic_ops --release
-cargo run --example simd_benchmark --release
+cargo run --example fast_math_demo --release
 ```
 
-## Advanced
+## Quantization
 
-| Example | What It Teaches | When to Use |
-|---------|-----------------|-------------|
-| `fast_math_demo` | Newton-Raphson rsqrt for 3x faster cosine | Hot paths in ANN search |
-| `ternary_demo` | 1.58-bit quantization: 16x memory, 18x speed | Deduplication, coarse filtering |
+| Example | What It Covers | Compression |
+|---------|----------------|-------------|
+| `binary_demo` | 1-bit quantization: Hamming, dot, Jaccard, recall trade-off | 32x vs f32 |
+| `ternary_demo` | 1.58-bit quantization: speed, dedup, ranking accuracy | 16x vs f32 |
 
 ```sh
-cargo run --example fast_math_demo --release
+cargo run --example binary_demo --release
 cargo run --example ternary_demo --release
 ```
 
-## Key Insight: Distance is the Bottleneck
+## Multi-Vector and Batch
 
-In HNSW search: ~20 hops * 32 neighbors = 640 distance calls per query.
+| Example | What It Covers | Feature Flag |
+|---------|----------------|--------------|
+| `maxsim_colbert` | ColBERT-style late interaction scoring, non-commutativity | `maxsim` |
+| `batch_demo` | PDX columnar layout, batch kNN, batch dot, timing | (none) |
 
+```sh
+cargo run --example maxsim_colbert --release --features maxsim
+cargo run --example batch_demo --release
+```
+
+## Decision Tree
+
+```
+What do you need?
+
+Exact similarity/distance?
+  --> Standard ops: dot, cosine, l2_distance (01_basic_ops)
+
+Faster cosine on hot paths (0.2% error OK)?
+  --> fast_cosine / fast_cosine_dispatch (fast_math_demo)
+
+32x memory compression, first-stage retrieval?
+  --> Binary quantization: encode_binary, binary_hamming (binary_demo)
+
+16x compression with rough ranking?
+  --> Ternary quantization: encode_ternary, ternary_dot (ternary_demo)
+
+ColBERT / late interaction scoring?
+  --> maxsim (maxsim_colbert, requires --features maxsim)
+
+Batch kNN over a corpus?
+  --> VerticalBatch + batch_knn (batch_demo)
+```
+
+## Key Insight: Distance Is the Bottleneck
+
+In HNSW search: ~20 hops x 32 neighbors = 640 distance calls per query.
 A 3x speedup in distance computation = 3x faster search.
 
-| Operation | Standard | Fast | Speedup |
-|-----------|----------|------|---------|
-| rsqrt | `1.0/x.sqrt()` | Newton-Raphson | ~3x |
-| cosine | divide by norms | fast_rsqrt | ~3x |
-| dot | portable | AVX2/NEON | ~4-8x |
-
-## When to Use Which
-
-```
-Need exact results?
-  └─> Standard ops (cosine, dot, l2_distance)
-
-Hot path, can tolerate 0.2% error?
-  └─> fast_cosine
-
-Memory-constrained, coarse filtering?
-  └─> Ternary quantization
-
-Deduplication (need rough similarity)?
-  └─> Ternary + threshold
-```
+| Operation | Standard | Accelerated | Typical Speedup |
+|-----------|----------|-------------|-----------------|
+| dot | portable loop | AVX2/NEON dispatch | 4-8x |
+| cosine | divide by norms | fast_rsqrt (Newton-Raphson) | 2-3x |
+| binary hamming | N/A | XOR + popcount | orders of magnitude vs f32 |

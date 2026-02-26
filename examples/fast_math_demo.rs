@@ -24,6 +24,7 @@
 
 use innr::cosine;
 use innr::fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
+use innr::{dot, dot_portable};
 use std::time::Instant;
 
 fn main() {
@@ -39,7 +40,10 @@ fn main() {
     // 3. Performance comparison
     demo_performance();
 
-    // 4. Real-world search scenario
+    // 4. SIMD vs portable dot product
+    demo_simd_dispatch();
+
+    // 5. Real-world search scenario
     demo_search_scenario();
 
     println!("Done!");
@@ -186,8 +190,59 @@ fn demo_performance() {
     println!();
 }
 
+fn demo_simd_dispatch() {
+    println!("4. SIMD vs Portable Dot Product");
+    println!("   -----------------------------\n");
+
+    println!("   innr::dot auto-dispatches to the fastest instruction set.");
+    println!("   innr::dot_portable uses scalar code (LLVM may still auto-vectorize).\n");
+
+    let iterations = 100_000;
+    let dims = [32, 128, 384, 768, 1536];
+
+    println!(
+        "   {:>8}  {:>12}  {:>12}  {:>8}",
+        "Dim", "SIMD", "Portable", "Speedup"
+    );
+    println!(
+        "   {:->8}  {:->12}  {:->12}  {:->8}",
+        "", "", "", ""
+    );
+
+    for &dim in &dims {
+        let a: Vec<f32> = (0..dim).map(|i| ((i * 17) % 100) as f32 / 100.0).collect();
+        let b: Vec<f32> = (0..dim).map(|i| ((i * 31) % 100) as f32 / 100.0).collect();
+
+        let start = Instant::now();
+        let mut sum = 0.0f32;
+        for _ in 0..iterations {
+            sum += dot(&a, &b);
+        }
+        let simd_time = start.elapsed();
+        std::hint::black_box(sum);
+
+        let start = Instant::now();
+        let mut sum = 0.0f32;
+        for _ in 0..iterations {
+            sum += dot_portable(&a, &b);
+        }
+        let portable_time = start.elapsed();
+        std::hint::black_box(sum);
+
+        let simd_ns = simd_time.as_nanos() as f64 / iterations as f64;
+        let portable_ns = portable_time.as_nanos() as f64 / iterations as f64;
+        let speedup = portable_ns / simd_ns;
+
+        println!(
+            "   {:>8}  {:>10.1}ns  {:>10.1}ns  {:>7.1}x",
+            dim, simd_ns, portable_ns, speedup
+        );
+    }
+    println!();
+}
+
 fn demo_search_scenario() {
-    println!("4. Real-World Search Scenario");
+    println!("5. Real-World Search Scenario");
     println!("   ---------------------------\n");
 
     let dim = 768;

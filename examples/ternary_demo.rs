@@ -22,6 +22,7 @@
 //! cargo run --example ternary_demo --release
 //! ```
 
+use innr::dot;
 use innr::ternary::{encode_ternary, sparsity, ternary_dot, PackedTernary};
 use std::time::Instant;
 
@@ -387,10 +388,6 @@ fn demo_best_practice() {
 // =============================================================================
 // Helpers
 // =============================================================================
-
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
 
 fn format_bytes(bytes: u64) -> String {
     if bytes >= 1_000_000_000 {

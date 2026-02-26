@@ -6,6 +6,14 @@
 //! This yields ~1.58 bits per dimension (log2(3)), providing massive
 //! compression while maintaining surprising accuracy.
 //!
+//! The 1.58-bit ternary approach is independently validated by Connor, Dearle &
+//! Claydon (2025), "Ultra-Quantisation: Efficient Embedding Search via 1.58-bit
+//! Encodings", which shows this exact {-1,0,+1} scheme preserves enough information
+//! for high-quality nearest-neighbor search. Chen et al. (2024), "Efficient Ternary
+//! Weight Embedding Model", further shows ternary embeddings achieve competitive
+//! quality with 20x compression over f32. The asymmetric scoring pattern (f32 query
+//! against ternary documents) is the recommended approach in both papers.
+//!
 //! # Representation
 //!
 //! We use two bits per value:

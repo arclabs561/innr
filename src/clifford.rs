@@ -1,9 +1,16 @@
 //! Clifford Algebra (Geometric Algebra) for steerable embeddings.
 //!
-//! # 2026 Rotors
+//! # Rotors
 //!
 //! Geometric algebra generalizes complex numbers and quaternions to arbitrary
 //! dimensions. A **Rotor** represents a rotation in a plane defined by a bivector.
+//!
+//! # References
+//!
+//! - Ruhe, Brandstetter, Forre (2023, NeurIPS), "Clifford Group Equivariant Neural
+//!   Networks" -- rotors as core primitives for O(n)/E(n)-equivariant architectures
+//! - Kamdem Teyou et al. (2024), "Embedding Knowledge Graphs in Degenerate Clifford
+//!   Algebras" -- Clifford algebras for KG embeddings, showing gains over quaternions
 //!
 //! ## Geometric Product
 //!

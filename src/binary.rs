@@ -3,7 +3,13 @@
 //! # Binary Quantization
 //!
 //! Binary vectors use only two values: {0, 1}. This yields 1 bit per dimension,
-//! providing the highest possible compression (32x vs f32).
+//! providing the highest possible compression (32x vs f32). Despite the extreme
+//! quantization, binary embeddings retain enough signal for first-stage retrieval
+//! when used as a re-ranking filter or in combination with asymmetric scoring.
+//!
+//! Binary quantization composes well with matryoshka (prefix-truncatable)
+//! embeddings: truncate first to reduce dimension, then binarize. This yields
+//! compounding compression along both the dimension and precision axes.
 //!
 //! # Hamming Distance
 //!
@@ -14,6 +20,15 @@
 //!
 //! The "dot product" of binary vectors is the number of positions where both are 1.
 //! This is computed using AND followed by popcount.
+//!
+//! # References
+//!
+//! - Gan et al. (2023). "Binary Embedding-based Retrieval at Tencent" (KDD) --
+//!   production validation of binary embeddings for retrieval over billions of
+//!   documents with 32x compression, using Hamming distance as the primary metric.
+//! - Ahemad (2025). "Quantization Aware Matryoshka Adaptation" (CIKM) -- shows
+//!   that matryoshka + binary quantization compose well: models trained with
+//!   joint MRL + binary awareness retain quality at extreme compression ratios.
 
 /// Packed binary vector as array of u64.
 ///

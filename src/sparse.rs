@@ -2,6 +2,14 @@
 //!
 //! Sparse vectors are represented as parallel arrays of sorted indices and values.
 //! The merge-join algorithm computes dot products in O(|a| + |b|) time.
+//!
+//! # References
+//!
+//! - Formal et al. (2021, SIGIR), "SPLADE: Sparse Lexical and Expansion Model" --
+//!   foundational reference for learned sparse representations; produces the sorted-index
+//!   sparse vectors this module operates on
+//! - Li et al. (2025), "SINDI: An Efficient Index for Approximate MIPS on Sparse Vectors"
+//!   -- validates sparse dot as a key primitive for production RAG systems
 
 /// Sparse dot product for sorted index arrays.
 ///

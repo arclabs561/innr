@@ -23,6 +23,13 @@
 //!        dimension 0                dimension 1
 //! ```
 //!
+//! # References
+//!
+//! - Kuffo, Krippner, Boncz (2025, SIGMOD), "PDX: A Data Layout for Vector
+//!   Similarity Search" -- the canonical paper for this columnar layout. Shows
+//!   that transposing storage from row-major vectors to column-major dimensions
+//!   enables better SIMD utilization and early termination for batch comparisons.
+//!
 //! # Why This Matters
 //!
 //! 1. **Cache efficiency**: Processing dimension-by-dimension keeps working

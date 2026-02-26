@@ -118,6 +118,7 @@ let n = norm(&a);         // 1.0
 
 | Architecture | Instructions | Detection |
 |--------------|--------------|-----------|
+| x86_64 | AVX-512F | Runtime |
 | x86_64 | AVX2 + FMA | Runtime |
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |

@@ -610,4 +610,331 @@ mod tests {
         assert!(cosines[1].abs() < 1e-6); // Orthogonal
         assert!((cosines[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01); // 45 degrees
     }
+
+    // =========================================================================
+    // Edge cases: empty and single-element batches
+    // =========================================================================
+
+    #[test]
+    fn test_empty_batch() {
+        let batch = VerticalBatch::from_rows(&[]);
+        assert_eq!(batch.num_vectors(), 0);
+        assert_eq!(batch.dimension(), 0);
+    }
+
+    #[test]
+    fn test_single_vector_batch() {
+        let vectors = vec![vec![1.0, 2.0, 3.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        assert_eq!(batch.num_vectors(), 1);
+        assert_eq!(batch.dimension(), 3);
+        assert_eq!(batch.get(0, 0), 1.0);
+        assert_eq!(batch.get(1, 0), 2.0);
+        assert_eq!(batch.get(2, 0), 3.0);
+        assert_eq!(batch.extract_vector(0), vec![1.0, 2.0, 3.0]);
+    }
+
+    // =========================================================================
+    // from_flat: round-trip and equivalence with from_rows
+    // =========================================================================
+
+    #[test]
+    fn test_from_flat_matches_from_rows() {
+        let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0], vec![7.0, 8.0, 9.0]];
+        let flat: Vec<f32> = vectors.iter().flatten().copied().collect();
+
+        let batch_rows = VerticalBatch::from_rows(&vectors);
+        let batch_flat = VerticalBatch::from_flat(&flat, 3, 3);
+
+        for d in 0..3 {
+            for v in 0..3 {
+                assert_eq!(
+                    batch_rows.get(d, v),
+                    batch_flat.get(d, v),
+                    "mismatch at dim={d}, vec={v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_flat_single_vector() {
+        let flat = [10.0, 20.0];
+        let batch = VerticalBatch::from_flat(&flat, 1, 2);
+        assert_eq!(batch.num_vectors(), 1);
+        assert_eq!(batch.dimension(), 2);
+        assert_eq!(batch.extract_vector(0), vec![10.0, 20.0]);
+    }
+
+    // =========================================================================
+    // dimension_slice correctness
+    // =========================================================================
+
+    #[test]
+    fn test_dimension_slice() {
+        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+
+        // Dimension 0 across all vectors: [1.0, 3.0, 5.0]
+        assert_eq!(batch.dimension_slice(0), &[1.0, 3.0, 5.0]);
+        // Dimension 1 across all vectors: [2.0, 4.0, 6.0]
+        assert_eq!(batch.dimension_slice(1), &[2.0, 4.0, 6.0]);
+    }
+
+    // =========================================================================
+    // get_unchecked safety-checked test
+    // =========================================================================
+
+    #[test]
+    fn test_get_unchecked_matches_get() {
+        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+
+        for d in 0..2 {
+            for v in 0..2 {
+                let safe = batch.get(d, v);
+                let unchecked = unsafe { batch.get_unchecked(d, v) };
+                assert_eq!(safe, unchecked, "mismatch at dim={d}, vec={v}");
+            }
+        }
+    }
+
+    // =========================================================================
+    // batch_norms correctness
+    // =========================================================================
+
+    #[test]
+    fn test_batch_norms() {
+        let vectors = vec![vec![3.0, 4.0], vec![0.0, 0.0], vec![1.0, 0.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let norms = batch_norms(&batch);
+
+        assert!((norms[0] - 5.0).abs() < 1e-6); // sqrt(9+16)
+        assert!(norms[1].abs() < 1e-6); // zero vector
+        assert!((norms[2] - 1.0).abs() < 1e-6); // unit vector
+    }
+
+    // =========================================================================
+    // batch_l2_squared: query equal to one of the vectors
+    // =========================================================================
+
+    #[test]
+    fn test_batch_l2_squared_exact_match() {
+        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![3.0, 4.0]; // matches v1 exactly
+
+        let distances = batch_l2_squared(&query, &batch);
+        assert!(distances[1].abs() < 1e-9, "exact match should have distance ~0");
+        assert!(distances[0] > 0.0);
+        assert!(distances[2] > 0.0);
+    }
+
+    // =========================================================================
+    // batch_dot: zero query
+    // =========================================================================
+
+    #[test]
+    fn test_batch_dot_zero_query() {
+        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let dots = batch_dot(&query, &batch);
+        assert_eq!(dots, vec![0.0, 0.0]);
+    }
+
+    // =========================================================================
+    // batch_cosine: zero-norm query and zero-norm vectors
+    // =========================================================================
+
+    #[test]
+    fn test_batch_cosine_zero_query() {
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let norms = batch_norms(&batch);
+        let query = vec![0.0, 0.0];
+
+        let cosines = batch_cosine(&query, &batch, &norms);
+        // Zero query norm -> all cosines 0.0
+        assert_eq!(cosines, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_batch_cosine_zero_norm_vector() {
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 0.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let norms = batch_norms(&batch);
+        let query = vec![1.0, 0.0];
+
+        let cosines = batch_cosine(&query, &batch, &norms);
+        assert!((cosines[0] - 1.0).abs() < 1e-6); // parallel
+        assert_eq!(cosines[1], 0.0); // zero-norm vector
+    }
+
+    // =========================================================================
+    // batch_knn edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_batch_knn_k_zero() {
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.0, 0.0];
+
+        let result = batch_knn(&query, &batch, 0);
+        assert!(result.indices.is_empty());
+        assert!(result.distances.is_empty());
+    }
+
+    #[test]
+    fn test_batch_knn_empty_batch() {
+        let batch = VerticalBatch::from_rows(&[]);
+        let result = batch_knn(&[], &batch, 5);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_batch_knn_k_larger_than_n() {
+        let vectors = vec![vec![1.0], vec![2.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.5];
+
+        let result = batch_knn(&query, &batch, 10);
+        // k is clamped to num_vectors
+        assert_eq!(result.indices.len(), 2);
+    }
+
+    #[test]
+    fn test_batch_knn_sorted_by_distance() {
+        let vectors = vec![
+            vec![10.0, 0.0],
+            vec![1.0, 0.0],
+            vec![5.0, 0.0],
+            vec![0.0, 0.0],
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let result = batch_knn(&query, &batch, 4);
+        // Distances should be sorted ascending
+        for w in result.distances.windows(2) {
+            assert!(w[0] <= w[1], "distances not sorted: {:?}", result.distances);
+        }
+        // Closest is v3 (origin)
+        assert_eq!(result.indices[0], 3);
+    }
+
+    // =========================================================================
+    // batch_l2_squared_pruning edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_pruning_threshold_zero() {
+        let vectors = vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![0.0, 1.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let survivors = batch_l2_squared_pruning(&query, &batch, 0.0);
+        // Only the origin (distance 0) survives with threshold 0
+        assert_eq!(survivors.len(), 1);
+        assert_eq!(survivors[0].0, 0);
+        assert!(survivors[0].1.abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_pruning_all_survive() {
+        let vectors = vec![vec![0.1, 0.0], vec![0.0, 0.1]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let survivors = batch_l2_squared_pruning(&query, &batch, 100.0);
+        assert_eq!(survivors.len(), 2);
+    }
+
+    #[test]
+    fn test_pruning_none_survive() {
+        let vectors = vec![vec![10.0, 0.0], vec![0.0, 10.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        // Threshold below the smallest distance (100.0)
+        let survivors = batch_l2_squared_pruning(&query, &batch, 0.5);
+        assert!(survivors.is_empty());
+    }
+
+    // =========================================================================
+    // batch_knn_adaptive: correctness check vs. exact knn
+    // =========================================================================
+
+    #[test]
+    fn test_batch_knn_adaptive_empty() {
+        let batch = VerticalBatch::from_rows(&[]);
+        let result = batch_knn_adaptive(&[], &batch, 5, 2);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_batch_knn_adaptive_k_zero() {
+        let vectors = vec![vec![1.0, 2.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let result = batch_knn_adaptive(&[1.0, 2.0], &batch, 0, 1);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_batch_knn_adaptive_finds_nearest() {
+        // The adaptive version should find the true nearest neighbor.
+        // We use well-separated vectors to avoid pruning the correct answer.
+        let vectors = vec![
+            vec![0.0, 0.0, 0.0, 0.0],
+            vec![100.0, 100.0, 100.0, 100.0],
+            vec![0.1, 0.1, 0.1, 0.1],
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0, 0.0, 0.0];
+
+        let exact = batch_knn(&query, &batch, 1);
+        let adaptive = batch_knn_adaptive(&query, &batch, 1, 2);
+
+        // Both should find v0 (the origin) as nearest
+        assert_eq!(exact.indices[0], 0);
+        assert_eq!(adaptive.indices[0], 0);
+    }
+
+    // =========================================================================
+    // Larger batch: 16+ vectors to exercise loop iterations
+    // =========================================================================
+
+    #[test]
+    fn test_batch_l2_squared_large() {
+        let n = 32;
+        let dim = 8;
+        let vectors: Vec<Vec<f32>> = (0..n)
+            .map(|i| (0..dim).map(|d| (i * dim + d) as f32).collect())
+            .collect();
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query: Vec<f32> = vectors[0].clone();
+
+        let distances = batch_l2_squared(&query, &batch);
+        assert!(distances[0].abs() < 1e-9, "self-distance should be ~0");
+        // All other distances should be positive
+        for (i, &d) in distances.iter().enumerate().skip(1) {
+            assert!(d > 0.0, "distance to vector {i} should be positive, got {d}");
+        }
+    }
+
+    #[test]
+    fn test_extract_all_vectors_roundtrip() {
+        let vectors = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+
+        for (i, original) in vectors.iter().enumerate() {
+            assert_eq!(batch.extract_vector(i), *original, "roundtrip failed for vector {i}");
+        }
+    }
 }

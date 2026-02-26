@@ -96,4 +96,141 @@ mod tests {
         assert_eq!(s, 0.0); // Orthogonal
         assert_eq!(b_part, 1.0); // Full wedge
     }
+
+    // =========================================================================
+    // Rotor2D: more rotation angles
+    // =========================================================================
+
+    #[test]
+    fn test_rotor_identity() {
+        // theta = 0 -> no rotation
+        let r = Rotor2D::from_angle(0.0);
+        let v = [3.0, 7.0];
+        let v_rot = r.rotate(v);
+        assert!((v_rot[0] - 3.0).abs() < 1e-6);
+        assert!((v_rot[1] - 7.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_rotor_180() {
+        // 180 degrees: (x, y) -> (-x, -y)
+        let r = Rotor2D::from_angle(std::f32::consts::PI);
+        let v = [1.0, 0.0];
+        let v_rot = r.rotate(v);
+        assert!((v_rot[0] - (-1.0)).abs() < 1e-5);
+        assert!(v_rot[1].abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_rotor_360() {
+        // Full rotation should return to original
+        let r = Rotor2D::from_angle(2.0 * std::f32::consts::PI);
+        let v = [2.0, 5.0];
+        let v_rot = r.rotate(v);
+        assert!((v_rot[0] - 2.0).abs() < 1e-4);
+        assert!((v_rot[1] - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_rotor_negative_angle() {
+        // -90 degrees: (1, 0) -> (0, -1)
+        let r = Rotor2D::from_angle(-std::f32::consts::FRAC_PI_2);
+        let v = [1.0, 0.0];
+        let v_rot = r.rotate(v);
+        assert!(v_rot[0].abs() < 1e-6);
+        assert!((v_rot[1] - (-1.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_rotor_preserves_magnitude() {
+        let r = Rotor2D::from_angle(1.23); // arbitrary angle
+        let v = [3.0, 4.0];
+        let v_rot = r.rotate(v);
+        let mag_orig = (v[0] * v[0] + v[1] * v[1]).sqrt();
+        let mag_rot = (v_rot[0] * v_rot[0] + v_rot[1] * v_rot[1]).sqrt();
+        assert!(
+            (mag_orig - mag_rot).abs() < 1e-5,
+            "rotation should preserve magnitude: {mag_orig} vs {mag_rot}"
+        );
+    }
+
+    #[test]
+    fn test_rotor_composition() {
+        // Two 45-degree rotations = one 90-degree rotation
+        let r45 = Rotor2D::from_angle(std::f32::consts::FRAC_PI_4);
+        let r90 = Rotor2D::from_angle(std::f32::consts::FRAC_PI_2);
+
+        let v = [1.0, 0.0];
+        let composed = r45.rotate(r45.rotate(v));
+        let direct = r90.rotate(v);
+
+        assert!((composed[0] - direct[0]).abs() < 1e-5);
+        assert!((composed[1] - direct[1]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_rotor_rotate_y_axis() {
+        // 90 degrees: (0, 1) -> (-1, 0)
+        let r = Rotor2D::from_angle(std::f32::consts::FRAC_PI_2);
+        let v = [0.0, 1.0];
+        let v_rot = r.rotate(v);
+        assert!((v_rot[0] - (-1.0)).abs() < 1e-6);
+        assert!(v_rot[1].abs() < 1e-6);
+    }
+
+    // =========================================================================
+    // Wedge product properties
+    // =========================================================================
+
+    #[test]
+    fn test_wedge_antisymmetric() {
+        let a = [3.0, 7.0];
+        let b = [2.0, 5.0];
+        let ab = wedge_2d(a, b);
+        let ba = wedge_2d(b, a);
+        assert!((ab + ba).abs() < 1e-6, "wedge should be antisymmetric");
+    }
+
+    #[test]
+    fn test_wedge_self_is_zero() {
+        let a = [3.0, 7.0];
+        assert!(wedge_2d(a, a).abs() < 1e-6, "a ^ a should be 0");
+    }
+
+    #[test]
+    fn test_wedge_parallel_is_zero() {
+        let a = [1.0, 2.0];
+        let b = [2.0, 4.0]; // parallel to a
+        assert!(wedge_2d(a, b).abs() < 1e-6, "parallel vectors have zero wedge");
+    }
+
+    #[test]
+    fn test_wedge_unit_basis() {
+        let e1 = [1.0, 0.0];
+        let e2 = [0.0, 1.0];
+        assert!((wedge_2d(e1, e2) - 1.0).abs() < 1e-6, "e1 ^ e2 = 1");
+    }
+
+    // =========================================================================
+    // Geometric product properties
+    // =========================================================================
+
+    #[test]
+    fn test_geometric_product_parallel() {
+        // Parallel vectors: wedge = 0, scalar = dot
+        let a = [1.0, 0.0];
+        let b = [3.0, 0.0];
+        let (s, w) = geometric_product_2d(a, b);
+        assert!((s - 3.0).abs() < 1e-6);
+        assert!(w.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_geometric_product_self() {
+        // a * a = |a|^2 (pure scalar)
+        let a = [3.0, 4.0];
+        let (s, w) = geometric_product_2d(a, a);
+        assert!((s - 25.0).abs() < 1e-6, "a*a scalar should be |a|^2");
+        assert!(w.abs() < 1e-6, "a*a wedge should be 0");
+    }
 }

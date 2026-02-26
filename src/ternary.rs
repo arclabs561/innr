@@ -409,4 +409,298 @@ mod tests {
         let hamming = ternary_hamming(&a, &b);
         assert_eq!(hamming, 2);
     }
+
+    // =========================================================================
+    // PackedTernary: construction and accessors
+    // =========================================================================
+
+    #[test]
+    fn test_zeros_all_zero() {
+        let v = PackedTernary::zeros(100);
+        for i in 0..100 {
+            assert_eq!(v.get(i), 0, "index {i} should be 0");
+        }
+        assert_eq!(v.nnz(), 0);
+    }
+
+    #[test]
+    fn test_set_get_all_values() {
+        let mut v = PackedTernary::zeros(3);
+        v.set(0, 1);
+        v.set(1, -1);
+        v.set(2, 0);
+        assert_eq!(v.get(0), 1);
+        assert_eq!(v.get(1), -1);
+        assert_eq!(v.get(2), 0);
+    }
+
+    #[test]
+    fn test_set_overwrite() {
+        let mut v = PackedTernary::zeros(1);
+        v.set(0, 1);
+        assert_eq!(v.get(0), 1);
+        v.set(0, -1);
+        assert_eq!(v.get(0), -1);
+        v.set(0, 0);
+        assert_eq!(v.get(0), 0);
+    }
+
+    #[test]
+    fn test_set_out_of_bounds_is_noop() {
+        let mut v = PackedTernary::zeros(4);
+        v.set(100, 1); // should not panic
+    }
+
+    #[test]
+    fn test_get_out_of_bounds_returns_zero() {
+        let v = PackedTernary::zeros(4);
+        assert_eq!(v.get(4), 0);
+        assert_eq!(v.get(1000), 0);
+    }
+
+    // =========================================================================
+    // Word boundary: values at positions 31, 32 (crossing u64 word boundary)
+    // =========================================================================
+
+    #[test]
+    fn test_word_boundary() {
+        let mut v = PackedTernary::zeros(64);
+        // Last position in first word
+        v.set(31, 1);
+        // First position in second word
+        v.set(32, -1);
+
+        assert_eq!(v.get(31), 1);
+        assert_eq!(v.get(32), -1);
+        assert_eq!(v.get(30), 0);
+        assert_eq!(v.get(33), 0);
+    }
+
+    // =========================================================================
+    // nnz and sparsity
+    // =========================================================================
+
+    #[test]
+    fn test_nnz() {
+        let mut v = PackedTernary::zeros(10);
+        v.set(0, 1);
+        v.set(3, -1);
+        v.set(7, 1);
+        assert_eq!(v.nnz(), 3);
+    }
+
+    #[test]
+    fn test_sparsity_all_zero() {
+        let v = PackedTernary::zeros(100);
+        assert!((sparsity(&v) - 1.0).abs() < 1e-6, "all-zero vector has sparsity 1.0");
+    }
+
+    #[test]
+    fn test_sparsity_all_nonzero() {
+        let values: Vec<f32> = vec![1.0, -1.0, 1.0, -1.0];
+        let packed = encode_ternary(&values, 0.0);
+        assert!(sparsity(&packed).abs() < 1e-6, "all-nonzero vector has sparsity 0.0");
+    }
+
+    #[test]
+    fn test_sparsity_half() {
+        let values: Vec<f32> = vec![1.0, 0.0, -1.0, 0.0];
+        let packed = encode_ternary(&values, 0.5);
+        // 1.0 > 0.5 -> +1, 0.0 in range -> 0, -1.0 < -0.5 -> -1, 0.0 -> 0
+        // nnz = 2 out of 4
+        assert!((sparsity(&packed) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_memory_bytes() {
+        let v = PackedTernary::zeros(768);
+        // 768 / 32 = 24 u64s = 192 bytes
+        assert_eq!(v.memory_bytes(), 192);
+    }
+
+    // =========================================================================
+    // encode_ternary edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_encode_ternary_empty() {
+        let packed = encode_ternary(&[], 0.5);
+        assert_eq!(packed.dimension, 0);
+        assert_eq!(packed.nnz(), 0);
+    }
+
+    #[test]
+    fn test_encode_ternary_at_threshold() {
+        // Values exactly at +/- threshold are NOT encoded as +/-1
+        // (v > threshold, not >=; v < -threshold, not <=)
+        let packed = encode_ternary(&[0.5, -0.5], 0.5);
+        assert_eq!(packed.get(0), 0, "value exactly at +threshold should be 0");
+        assert_eq!(packed.get(1), 0, "value exactly at -threshold should be 0");
+    }
+
+    #[test]
+    fn test_encode_ternary_zero_threshold() {
+        // threshold=0: positive -> +1, negative -> -1, zero -> 0
+        let packed = encode_ternary(&[1.0, -1.0, 0.0], 0.0);
+        assert_eq!(packed.get(0), 1);
+        assert_eq!(packed.get(1), -1);
+        assert_eq!(packed.get(2), 0);
+    }
+
+    // =========================================================================
+    // ternary_dot: larger vectors and mixed scenarios
+    // =========================================================================
+
+    #[test]
+    fn test_ternary_dot_all_zeros() {
+        let a = PackedTernary::zeros(100);
+        let b = PackedTernary::zeros(100);
+        assert_eq!(ternary_dot(&a, &b), 0);
+    }
+
+    #[test]
+    fn test_ternary_dot_mixed_large() {
+        // 64 dimensions (exactly 2 u64 words)
+        let mut a = PackedTernary::zeros(64);
+        let mut b = PackedTernary::zeros(64);
+
+        // Set some values in both words
+        for i in (0..64).step_by(3) {
+            a.set(i, 1);
+        }
+        for i in (0..64).step_by(3) {
+            b.set(i, 1);
+        }
+
+        // All matching -> dot = count of set positions
+        let count = (0..64).step_by(3).count() as i32;
+        assert_eq!(ternary_dot(&a, &b), count);
+    }
+
+    // =========================================================================
+    // asymmetric_dot edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_asymmetric_dot_zero_query() {
+        let mut t = PackedTernary::zeros(3);
+        t.set(0, 1);
+        t.set(1, -1);
+
+        let query = vec![0.0, 0.0, 0.0];
+        assert!(asymmetric_dot(&query, &t).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_asymmetric_dot_zero_ternary() {
+        let t = PackedTernary::zeros(3);
+        let query = vec![1.0, 2.0, 3.0];
+        assert!(asymmetric_dot(&query, &t).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_asymmetric_dot_negative_query() {
+        let mut t = PackedTernary::zeros(2);
+        t.set(0, 1);
+        t.set(1, -1);
+
+        let query = vec![-3.0, -4.0];
+        // -3*1 + -4*(-1) = -3 + 4 = 1
+        let result = asymmetric_dot(&query, &t);
+        assert!((result - 1.0).abs() < 1e-6);
+    }
+
+    // =========================================================================
+    // batch_asymmetric_dot
+    // =========================================================================
+
+    #[test]
+    fn test_batch_asymmetric_dot() {
+        let mut t1 = PackedTernary::zeros(2);
+        t1.set(0, 1);
+
+        let mut t2 = PackedTernary::zeros(2);
+        t2.set(1, -1);
+
+        let query = vec![1.0, 2.0];
+        let results = batch_asymmetric_dot(&query, &[t1, t2]);
+
+        // t1: 1*1 + 0*2 = 1
+        assert!((results[0] - 1.0).abs() < 1e-6);
+        // t2: 0*1 + (-1)*2 = -2
+        assert!((results[1] - (-2.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_batch_asymmetric_dot_empty() {
+        let query = vec![1.0, 2.0];
+        let results = batch_asymmetric_dot(&query, &[]);
+        assert!(results.is_empty());
+    }
+
+    // =========================================================================
+    // ternary_hamming edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_hamming_identical() {
+        let mut v = PackedTernary::zeros(10);
+        v.set(0, 1);
+        v.set(3, -1);
+        v.set(7, 1);
+        assert_eq!(ternary_hamming(&v, &v), 0, "hamming(v, v) should be 0");
+    }
+
+    #[test]
+    fn test_hamming_all_opposite() {
+        let mut a = PackedTernary::zeros(4);
+        let mut b = PackedTernary::zeros(4);
+
+        a.set(0, 1);
+        a.set(1, -1);
+        a.set(2, 1);
+        a.set(3, -1);
+
+        b.set(0, -1);
+        b.set(1, 1);
+        b.set(2, -1);
+        b.set(3, 1);
+
+        assert_eq!(ternary_hamming(&a, &b), 4);
+    }
+
+    #[test]
+    fn test_hamming_zeros_ignored() {
+        // Hamming only counts positions where both are non-zero and differ
+        let mut a = PackedTernary::zeros(4);
+        let mut b = PackedTernary::zeros(4);
+
+        a.set(0, 1);
+        // b[0] = 0 -> not counted (both must be non-zero)
+        b.set(1, -1);
+        // a[1] = 0 -> not counted
+
+        assert_eq!(ternary_hamming(&a, &b), 0);
+    }
+
+    // =========================================================================
+    // Encode + dot round-trip consistency
+    // =========================================================================
+
+    #[test]
+    fn test_encode_then_dot_consistency() {
+        let values_a: Vec<f32> = (0..32).map(|i| (i as f32 - 16.0) / 10.0).collect();
+        let values_b: Vec<f32> = (0..32).map(|i| ((i * 3) as f32 - 48.0) / 10.0).collect();
+
+        let a = encode_ternary(&values_a, 0.5);
+        let b = encode_ternary(&values_b, 0.5);
+
+        // Compute expected dot product from decoded values
+        let mut expected = 0i32;
+        for i in 0..32 {
+            expected += (a.get(i) as i32) * (b.get(i) as i32);
+        }
+
+        assert_eq!(ternary_dot(&a, &b), expected);
+    }
 }

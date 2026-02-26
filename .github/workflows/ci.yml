@@ -150,3 +150,27 @@ jobs:
         run: cargo test property_ --all-features
         env:
           PROPTEST_CASES: 2000
+
+  # MSRV (Minimum Supported Rust Version)
+  msrv:
+    name: MSRV (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+      - uses: Swatinem/rust-cache@v2
+      # cargo check only: dev-deps (criterion, proptest) may need newer Rust
+      - name: Check MSRV
+        run: |
+          rm -f Cargo.lock  # v4 lock file requires Cargo 1.83+
+          cargo check --all-features
+
+  # Dependency linting (licenses, advisories, bans, sources)
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

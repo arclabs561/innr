@@ -26,6 +26,16 @@ cargo run --example binary_demo --release
 cargo run --example ternary_demo --release
 ```
 
+## Matryoshka (MRL)
+
+| Example | What It Covers |
+|---------|----------------|
+| `matryoshka_search` | Two-stage retrieval: coarse 128d filter, fine 768d re-rank, recall and timing |
+
+```sh
+cargo run --example matryoshka_search --release
+```
+
 ## Multi-Vector and Batch
 
 | Example | What It Covers | Feature Flag |
@@ -54,6 +64,9 @@ Faster cosine on hot paths (0.2% error OK)?
 
 16x compression with rough ranking?
   --> Ternary quantization: encode_ternary, ternary_dot (ternary_demo)
+
+Prefix-truncatable (MRL) two-stage retrieval?
+  --> matryoshka_cosine coarse pass + cosine fine pass (matryoshka_search)
 
 ColBERT / late interaction scoring?
   --> maxsim (maxsim_colbert, requires --features maxsim)

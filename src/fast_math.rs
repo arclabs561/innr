@@ -133,9 +133,11 @@ pub fn fast_cosine_distance(a: &[f32], b: &[f32]) -> f32 {
 pub mod x86_64 {
     //! AVX2/AVX-512 fast cosine using rsqrt instructions.
 
-    /// AVX-512 fast cosine with rsqrt14 + Newton-Raphson.
+    /// AVX-512 fast cosine with hardware rsqrt + Newton-Raphson.
     ///
-    /// Uses `vrsqrt14ps` for ~14-bit initial estimate, then one NR iteration.
+    /// Uses SSE `rsqrtps` for ~12-bit initial estimate, then one NR iteration.
+    /// We use `_mm_rsqrt_ps` (SSE) rather than `_mm512_rsqrt14_ps` to avoid
+    /// requiring AVX-512VL; SSE is always available when AVX-512F is present.
     ///
     /// # Safety
     ///
@@ -145,6 +147,9 @@ pub mod x86_64 {
     pub unsafe fn fast_cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::x86_64::{
             __m512, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_reduce_add_ps, _mm512_setzero_ps,
+            // SSE intrinsics for final rsqrt
+            _mm_cvtss_f32, _mm_mul_ps, _mm_rsqrt_ps, _mm_set_ps, _mm_set1_ps,
+            _mm_shuffle_ps, _mm_sub_ps,
         };
 
         let n = a.len().min(b.len());
@@ -186,15 +191,31 @@ pub mod x86_64 {
             bb += bi * bi;
         }
 
-        // Fast rsqrt with NR refinement
+        // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
         if aa > super::NORM_EPSILON && bb > super::NORM_EPSILON {
-            ab * super::fast_rsqrt(aa) * super::fast_rsqrt(bb)
+            // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
+            let vals = _mm_set_ps(1.0, 1.0, bb, aa);
+            // Initial ~12-bit rsqrt estimate
+            let est = _mm_rsqrt_ps(vals);
+            // One NR iteration: y = y * (1.5 - 0.5 * x * y * y)
+            let half = _mm_set1_ps(0.5);
+            let three_half = _mm_set1_ps(1.5);
+            let half_x = _mm_mul_ps(half, vals);
+            let est_sq = _mm_mul_ps(est, est);
+            let refined = _mm_mul_ps(est, _mm_sub_ps(three_half, _mm_mul_ps(half_x, est_sq)));
+            // Extract lane 0 (rsqrt_aa) and lane 1 (rsqrt_bb)
+            let rsqrt_aa = _mm_cvtss_f32(refined);
+            let rsqrt_bb = _mm_cvtss_f32(_mm_shuffle_ps(refined, refined, 0x55));
+            ab * rsqrt_aa * rsqrt_bb
         } else {
             0.0
         }
     }
 
-    /// AVX2 fast cosine with rsqrt + Newton-Raphson.
+    /// AVX2 fast cosine with hardware rsqrt + Newton-Raphson.
+    ///
+    /// Uses SSE `_mm_rsqrt_ps` for ~12-bit initial estimate, then one
+    /// Newton-Raphson iteration for ~24 bits of accuracy.
     ///
     /// # Safety
     ///
@@ -205,7 +226,8 @@ pub mod x86_64 {
         use std::arch::x86_64::{
             __m256, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
             _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32,
-            _mm_movehl_ps, _mm_shuffle_ps,
+            _mm_movehl_ps, _mm_mul_ps, _mm_rsqrt_ps, _mm_set_ps, _mm_set1_ps,
+            _mm_shuffle_ps, _mm_sub_ps,
         };
 
         let n = a.len().min(b.len());
@@ -257,8 +279,22 @@ pub mod x86_64 {
             bb += bi * bi;
         }
 
+        // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
         if aa > super::NORM_EPSILON && bb > super::NORM_EPSILON {
-            ab * super::fast_rsqrt(aa) * super::fast_rsqrt(bb)
+            // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
+            let vals = _mm_set_ps(1.0, 1.0, bb, aa);
+            // Initial ~12-bit rsqrt estimate
+            let est = _mm_rsqrt_ps(vals);
+            // One NR iteration: y = y * (1.5 - 0.5 * x * y * y)
+            let half = _mm_set1_ps(0.5);
+            let three_half = _mm_set1_ps(1.5);
+            let half_x = _mm_mul_ps(half, vals);
+            let est_sq = _mm_mul_ps(est, est);
+            let refined = _mm_mul_ps(est, _mm_sub_ps(three_half, _mm_mul_ps(half_x, est_sq)));
+            // Extract lane 0 (rsqrt_aa) and lane 1 (rsqrt_bb)
+            let rsqrt_aa = _mm_cvtss_f32(refined);
+            let rsqrt_bb = _mm_cvtss_f32(_mm_shuffle_ps(refined, refined, 0x55));
+            ab * rsqrt_aa * rsqrt_bb
         } else {
             0.0
         }

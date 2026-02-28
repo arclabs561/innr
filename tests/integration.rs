@@ -1,7 +1,7 @@
 //! Integration tests verifying `innr` works correctly across the mathematical foundation.
 //!
 //! These tests ensure that the SIMD primitives produce consistent results
-//! when used by different crates (plesio, cerno-rerank).
+//! when used by different downstream crates.
 
 use std::time::Instant;
 

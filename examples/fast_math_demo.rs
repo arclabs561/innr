@@ -12,11 +12,8 @@
 //!
 //! # Integration
 //!
-//! ```rust,ignore
-//! // plesio uses innr internally for hot paths
-//! let index = plesio::hnsw::HNSWIndex::new(dim, m, ef)?;
-//! // distance calls go through innr::cosine or innr::fast_math
-//! ```
+//! Any HNSW or ANN index can use `innr` for its hot-path distance calls
+//! (`innr::cosine`, `innr::dot`, `innr::fast_math`).
 //!
 //! ```bash
 //! cargo run --example fast_math_demo --release

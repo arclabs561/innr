@@ -2,12 +2,12 @@
 //!
 //! This module is intentionally minimal:
 //! - It defines *interfaces*, not implementations.
-//! - It is dependency-free (L0-friendly).
+//! - It is dependency-free.
 //! - It keeps scalar type generic (works for `f32` and `f64`).
 //!
 //! Rationale:
-//! - We want downstream crates (L1+) to be able to specialize metric/space pairs
-//!   without routing through an extra "law" crate boundary.
+//! - Downstream crates can specialize metric/space pairs without routing
+//!   through an extra "law" crate boundary.
 //! - By keeping the trait here, every vector-space component can be "metric-aware"
 //!   without introducing higher-layer dependencies.
 //!

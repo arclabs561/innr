@@ -20,8 +20,14 @@ const FINAL_K: usize = 10;
 fn main() {
     println!("Matryoshka Progressive Search");
     println!("=============================\n");
-    println!("Corpus: {} vectors, {}d (prefix {}d)", CORPUS_SIZE, FULL_DIM, PREFIX_DIM);
-    println!("Pipeline: coarse top-{} at {}d -> fine top-{} at {}d\n", COARSE_K, PREFIX_DIM, FINAL_K, FULL_DIM);
+    println!(
+        "Corpus: {} vectors, {}d (prefix {}d)",
+        CORPUS_SIZE, FULL_DIM, PREFIX_DIM
+    );
+    println!(
+        "Pipeline: coarse top-{} at {}d -> fine top-{} at {}d\n",
+        COARSE_K, PREFIX_DIM, FINAL_K, FULL_DIM
+    );
 
     let corpus: Vec<Vec<f32>> = (0..CORPUS_SIZE)
         .map(|i| normalize(&generate_vec(FULL_DIM, i as u64)))
@@ -72,16 +78,38 @@ fn main() {
 
     println!("Timing");
     println!("------");
-    println!("  Exact brute-force ({}d):          {:?}", FULL_DIM, exact_time);
-    println!("  Coarse pass ({}d):                {:?}", PREFIX_DIM, coarse_time);
-    println!("  Fine pass ({}d, {} candidates):  {:?}", FULL_DIM, COARSE_K, fine_time);
-    println!("  Two-stage total:                  {:?}", coarse_time + fine_time);
+    println!(
+        "  Exact brute-force ({}d):          {:?}",
+        FULL_DIM, exact_time
+    );
+    println!(
+        "  Coarse pass ({}d):                {:?}",
+        PREFIX_DIM, coarse_time
+    );
+    println!(
+        "  Fine pass ({}d, {} candidates):  {:?}",
+        FULL_DIM, COARSE_K, fine_time
+    );
+    println!(
+        "  Two-stage total:                  {:?}",
+        coarse_time + fine_time
+    );
     println!("  Speedup vs brute-force:           {:.2}x\n", speedup);
 
     println!("Recall");
     println!("------");
-    println!("  Coarse recall@{} (top-{} at {}d): {:.1}%", FINAL_K, COARSE_K, PREFIX_DIM, coarse_recall * 100.0);
-    println!("  Final recall@{}:                  {:.1}%\n", FINAL_K, final_recall * 100.0);
+    println!(
+        "  Coarse recall@{} (top-{} at {}d): {:.1}%",
+        FINAL_K,
+        COARSE_K,
+        PREFIX_DIM,
+        coarse_recall * 100.0
+    );
+    println!(
+        "  Final recall@{}:                  {:.1}%\n",
+        FINAL_K,
+        final_recall * 100.0
+    );
 
     println!("Top-{} (exact vs two-stage)", FINAL_K);
     println!("--------------------------");
@@ -89,7 +117,15 @@ fn main() {
         let (ei, es) = exact[rank];
         let (fi, fs) = fine[rank];
         let tag = if ei == fi { " " } else { "*" };
-        println!("  #{:>2} exact: idx={:>5} sim={:.6}  | two-stage: idx={:>5} sim={:.6} {}", rank + 1, ei, es, fi, fs, tag);
+        println!(
+            "  #{:>2} exact: idx={:>5} sim={:.6}  | two-stage: idx={:>5} sim={:.6} {}",
+            rank + 1,
+            ei,
+            es,
+            fi,
+            fs,
+            tag
+        );
     }
     println!("\n(* = rank differs from exact)");
 }

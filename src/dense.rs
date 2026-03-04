@@ -669,19 +669,14 @@ mod proptests {
     /// well above NORM_EPSILON, avoiding the zero-vector guard in cosine().
     fn nonzero_vec(len: usize) -> impl Strategy<Value = Vec<f32>> {
         prop::collection::vec(
-            prop_oneof![
-                0.01_f32..100.0_f32,
-                -100.0_f32..-0.01_f32,
-            ],
+            prop_oneof![0.01_f32..100.0_f32, -100.0_f32..-0.01_f32,],
             len,
         )
     }
 
     /// Generate (dim, vec_a, vec_b) where dim comes from DIMS.
     fn dim_and_two_vecs() -> impl Strategy<Value = (usize, Vec<f32>, Vec<f32>)> {
-        simd_dim().prop_flat_map(|d| {
-            (Just(d), bounded_vec(d), bounded_vec(d))
-        })
+        simd_dim().prop_flat_map(|d| (Just(d), bounded_vec(d), bounded_vec(d)))
     }
 
     /// Generate (dim, vec) where dim comes from DIMS.
@@ -691,9 +686,7 @@ mod proptests {
 
     /// Generate (dim, vec_a, vec_b) with non-zero vectors.
     fn dim_and_two_nonzero_vecs() -> impl Strategy<Value = (usize, Vec<f32>, Vec<f32>)> {
-        simd_dim().prop_flat_map(|d| {
-            (Just(d), nonzero_vec(d), nonzero_vec(d))
-        })
+        simd_dim().prop_flat_map(|d| (Just(d), nonzero_vec(d), nonzero_vec(d)))
     }
 
     /// Generate (dim, vec) with non-zero vector.
@@ -703,9 +696,7 @@ mod proptests {
 
     /// Generate (dim, vec_a, vec_b, vec_c) for three-vector properties.
     fn dim_and_three_vecs() -> impl Strategy<Value = (usize, Vec<f32>, Vec<f32>, Vec<f32>)> {
-        simd_dim().prop_flat_map(|d| {
-            (Just(d), bounded_vec(d), bounded_vec(d), bounded_vec(d))
-        })
+        simd_dim().prop_flat_map(|d| (Just(d), bounded_vec(d), bounded_vec(d), bounded_vec(d)))
     }
 
     proptest! {

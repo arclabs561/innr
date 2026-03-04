@@ -261,7 +261,10 @@ mod tests {
     fn test_sparse_dot_both_empty() {
         let empty_idx: [u32; 0] = [];
         let empty_val: [f32; 0] = [];
-        assert_eq!(sparse_dot(&empty_idx, &empty_val, &empty_idx, &empty_val), 0.0);
+        assert_eq!(
+            sparse_dot(&empty_idx, &empty_val, &empty_idx, &empty_val),
+            0.0
+        );
     }
 
     #[test]

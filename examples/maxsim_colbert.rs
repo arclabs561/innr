@@ -96,7 +96,10 @@ fn demo_non_commutative() {
     //   total = 0.5 + 0.3 + 0.8 = 1.6
     println!("   maxsim(Q[1], D[3]) = {:.4}", score_qd);
     println!("   maxsim(D[3], Q[1]) = {:.4}", score_dq);
-    println!("   Difference:          {:.4}\n", (score_qd - score_dq).abs());
+    println!(
+        "   Difference:          {:.4}\n",
+        (score_qd - score_dq).abs()
+    );
 
     assert!((score_qd - 0.8).abs() < 1e-5);
     assert!((score_dq - 1.6).abs() < 1e-5);
@@ -209,7 +212,9 @@ fn naive_maxsim(query: &[&[f32]], doc: &[&[f32]]) -> f32 {
 fn generate_normalized(dim: usize, seed: u64) -> Vec<f32> {
     let mut v: Vec<f32> = (0..dim)
         .map(|i| {
-            let x = seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64 * 1442695040888963407);
+            let x = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(i as u64 * 1442695040888963407);
             ((x >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
         })
         .collect();

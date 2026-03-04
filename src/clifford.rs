@@ -208,7 +208,10 @@ mod tests {
     fn test_wedge_parallel_is_zero() {
         let a = [1.0, 2.0];
         let b = [2.0, 4.0]; // parallel to a
-        assert!(wedge_2d(a, b).abs() < 1e-6, "parallel vectors have zero wedge");
+        assert!(
+            wedge_2d(a, b).abs() < 1e-6,
+            "parallel vectors have zero wedge"
+        );
     }
 
     #[test]

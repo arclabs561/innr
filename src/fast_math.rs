@@ -146,10 +146,19 @@ pub mod x86_64 {
     #[target_feature(enable = "avx512f")]
     pub unsafe fn fast_cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::x86_64::{
-            __m512, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_reduce_add_ps, _mm512_setzero_ps,
+            __m512,
+            _mm512_fmadd_ps,
+            _mm512_loadu_ps,
+            _mm512_reduce_add_ps,
+            _mm512_setzero_ps,
             // SSE intrinsics for final rsqrt
-            _mm_cvtss_f32, _mm_mul_ps, _mm_rsqrt_ps, _mm_set_ps, _mm_set1_ps,
-            _mm_shuffle_ps, _mm_sub_ps,
+            _mm_cvtss_f32,
+            _mm_mul_ps,
+            _mm_rsqrt_ps,
+            _mm_set1_ps,
+            _mm_set_ps,
+            _mm_shuffle_ps,
+            _mm_sub_ps,
         };
 
         let n = a.len().min(b.len());
@@ -226,8 +235,8 @@ pub mod x86_64 {
         use std::arch::x86_64::{
             __m256, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
             _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32,
-            _mm_movehl_ps, _mm_mul_ps, _mm_rsqrt_ps, _mm_set_ps, _mm_set1_ps,
-            _mm_shuffle_ps, _mm_sub_ps,
+            _mm_movehl_ps, _mm_mul_ps, _mm_rsqrt_ps, _mm_set1_ps, _mm_set_ps, _mm_shuffle_ps,
+            _mm_sub_ps,
         };
 
         let n = a.len().min(b.len());
@@ -316,8 +325,8 @@ pub mod aarch64 {
     #[target_feature(enable = "neon")]
     pub unsafe fn fast_cosine_neon(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::aarch64::{
-            float32x2_t, float32x4_t, vaddq_f32, vaddvq_f32, vdup_n_f32, vdupq_n_f32,
-            vfmaq_f32, vget_lane_f32, vld1q_f32, vmul_f32, vrsqrte_f32, vrsqrts_f32,
+            float32x2_t, float32x4_t, vaddq_f32, vaddvq_f32, vdup_n_f32, vdupq_n_f32, vfmaq_f32,
+            vget_lane_f32, vld1q_f32, vmul_f32, vrsqrte_f32, vrsqrts_f32,
         };
 
         let n = a.len().min(b.len());
@@ -617,12 +626,18 @@ mod tests {
             assert!(
                 port_err < 0.01,
                 "dim={}: portable={}, standard={}, err={}",
-                dim, portable, standard, port_err
+                dim,
+                portable,
+                standard,
+                port_err
             );
             assert!(
                 disp_err < 0.01,
                 "dim={}: dispatched={}, standard={}, err={}",
-                dim, dispatched, standard, disp_err
+                dim,
+                dispatched,
+                standard,
+                disp_err
             );
             // And they should agree within 2e-3 (different rsqrt methods:
             // scalar Quake III bit-hack vs NEON vrsqrte + 2 NR iterations)
@@ -630,7 +645,10 @@ mod tests {
             assert!(
                 diff < 2e-3,
                 "dim={}: portable={}, dispatched={}, diff={}",
-                dim, portable, dispatched, diff
+                dim,
+                portable,
+                dispatched,
+                diff
             );
         }
     }

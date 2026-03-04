@@ -361,7 +361,9 @@ mod tests {
     #[test]
     fn test_encode_binary_large() {
         // 768 dimensions (typical embedding size)
-        let v: Vec<f32> = (0..768).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let v: Vec<f32> = (0..768)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         let packed = encode_binary(&v, 0.0);
         assert_eq!(packed.dimension, 768);
         assert_eq!(packed.data.len(), 12); // ceil(768/64)
@@ -410,7 +412,7 @@ mod tests {
     fn test_jaccard_disjoint() {
         let a = encode_binary(&[1.0, -1.0], 0.0); // bits: {0}
         let b = encode_binary(&[-1.0, 1.0], 0.0); // bits: {1}
-        // intersection = 0, union = 2 -> jaccard = 0
+                                                  // intersection = 0, union = 2 -> jaccard = 0
         let j = binary_jaccard(&a, &b);
         assert!(j.abs() < 1e-6);
     }

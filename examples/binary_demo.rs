@@ -179,7 +179,10 @@ fn demo_recall() {
         binary_scores.sort_by_key(|(_, h)| *h);
         let binary_topk: Vec<usize> = binary_scores.iter().take(k).map(|(i, _)| *i).collect();
 
-        let overlap = exact_topk.iter().filter(|i| binary_topk.contains(i)).count();
+        let overlap = exact_topk
+            .iter()
+            .filter(|i| binary_topk.contains(i))
+            .count();
         total_recall += overlap as f64 / k as f64;
     }
 

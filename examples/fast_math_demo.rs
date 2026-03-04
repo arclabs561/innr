@@ -201,10 +201,7 @@ fn demo_simd_dispatch() {
         "   {:>8}  {:>12}  {:>12}  {:>8}",
         "Dim", "SIMD", "Portable", "Speedup"
     );
-    println!(
-        "   {:->8}  {:->12}  {:->12}  {:->8}",
-        "", "", "", ""
-    );
+    println!("   {:->8}  {:->12}  {:->12}  {:->8}", "", "", "", "");
 
     for &dim in &dims {
         let a: Vec<f32> = (0..dim).map(|i| ((i * 17) % 100) as f32 / 100.0).collect();

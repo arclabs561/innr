@@ -500,14 +500,20 @@ mod tests {
     #[test]
     fn test_sparsity_all_zero() {
         let v = PackedTernary::zeros(100);
-        assert!((sparsity(&v) - 1.0).abs() < 1e-6, "all-zero vector has sparsity 1.0");
+        assert!(
+            (sparsity(&v) - 1.0).abs() < 1e-6,
+            "all-zero vector has sparsity 1.0"
+        );
     }
 
     #[test]
     fn test_sparsity_all_nonzero() {
         let values: Vec<f32> = vec![1.0, -1.0, 1.0, -1.0];
         let packed = encode_ternary(&values, 0.0);
-        assert!(sparsity(&packed).abs() < 1e-6, "all-nonzero vector has sparsity 0.0");
+        assert!(
+            sparsity(&packed).abs() < 1e-6,
+            "all-nonzero vector has sparsity 0.0"
+        );
     }
 
     #[test]

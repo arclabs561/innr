@@ -83,9 +83,7 @@ fn demo_knn() {
     let k = 3;
 
     // Generate a small corpus
-    let corpus: Vec<Vec<f32>> = (0..n)
-        .map(|i| generate_embedding(dim, i as u64))
-        .collect();
+    let corpus: Vec<Vec<f32>> = (0..n).map(|i| generate_embedding(dim, i as u64)).collect();
     let query = generate_embedding(dim, 999);
 
     let batch = VerticalBatch::from_rows(&corpus);
@@ -104,7 +102,12 @@ fn demo_knn() {
 
     println!("   Corpus: {} vectors, dim={}, k={}\n", n, dim, k);
     println!("   batch_knn results:");
-    for (rank, (&idx, &dist)) in result.indices.iter().zip(result.distances.iter()).enumerate() {
+    for (rank, (&idx, &dist)) in result
+        .indices
+        .iter()
+        .zip(result.distances.iter())
+        .enumerate()
+    {
         println!("     #{}: index={}, dist_sq={:.6}", rank + 1, idx, dist);
     }
 
@@ -166,9 +169,7 @@ fn demo_timing() {
     let n = 10_000;
     let n_queries = 100;
 
-    let corpus: Vec<Vec<f32>> = (0..n)
-        .map(|i| generate_embedding(dim, i as u64))
-        .collect();
+    let corpus: Vec<Vec<f32>> = (0..n).map(|i| generate_embedding(dim, i as u64)).collect();
     let queries: Vec<Vec<f32>> = (0..n_queries)
         .map(|i| generate_embedding(dim, (i + 50_000) as u64))
         .collect();

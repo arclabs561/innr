@@ -647,7 +647,11 @@ mod tests {
 
     #[test]
     fn test_from_flat_matches_from_rows() {
-        let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0], vec![7.0, 8.0, 9.0]];
+        let vectors = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ];
         let flat: Vec<f32> = vectors.iter().flatten().copied().collect();
 
         let batch_rows = VerticalBatch::from_rows(&vectors);
@@ -732,7 +736,10 @@ mod tests {
         let query = vec![3.0, 4.0]; // matches v1 exactly
 
         let distances = batch_l2_squared(&query, &batch);
-        assert!(distances[1].abs() < 1e-9, "exact match should have distance ~0");
+        assert!(
+            distances[1].abs() < 1e-9,
+            "exact match should have distance ~0"
+        );
         assert!(distances[0] > 0.0);
         assert!(distances[2] > 0.0);
     }
@@ -927,7 +934,10 @@ mod tests {
         assert!(distances[0].abs() < 1e-9, "self-distance should be ~0");
         // All other distances should be positive
         for (i, &d) in distances.iter().enumerate().skip(1) {
-            assert!(d > 0.0, "distance to vector {i} should be positive, got {d}");
+            assert!(
+                d > 0.0,
+                "distance to vector {i} should be positive, got {d}"
+            );
         }
     }
 
@@ -941,7 +951,11 @@ mod tests {
         let batch = VerticalBatch::from_rows(&vectors);
 
         for (i, original) in vectors.iter().enumerate() {
-            assert_eq!(batch.extract_vector(i), *original, "roundtrip failed for vector {i}");
+            assert_eq!(
+                batch.extract_vector(i),
+                *original,
+                "roundtrip failed for vector {i}"
+            );
         }
     }
 }

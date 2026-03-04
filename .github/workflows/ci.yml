@@ -58,14 +58,16 @@ jobs:
   # This catches bitrot in AVX-512-specialized code without requiring AVX-512 hardware.
   compile-avx512:
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-Dwarnings -C target-feature=+avx512f"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Compile tests (AVX-512)
-        run: cargo test --all-features --no-run
+        run: cargo test --target x86_64-unknown-linux-gnu --all-features --no-run
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-Dwarnings -C target-feature=+avx512f"
 
   # ARM native testing (M1/M2 NEON)
   test-arm:

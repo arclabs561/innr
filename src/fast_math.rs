@@ -131,6 +131,7 @@ pub fn fast_cosine_distance(a: &[f32], b: &[f32]) -> f32 {
 
 #[cfg(target_arch = "x86_64")]
 #[allow(unsafe_code)]
+#[allow(clippy::incompatible_msrv)]
 pub(crate) mod x86_64 {
     //! AVX2/AVX-512 fast cosine using rsqrt instructions.
 

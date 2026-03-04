@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Benchmarks comparing fast_math approximations vs standard implementations.
 //!
 //! These benchmarks demonstrate the speedup from Newton-Raphson rsqrt

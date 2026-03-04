@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Benchmarks for ternary quantization operations.
 //!
 //! Demonstrates the compression ratio and speed of ternary vectors

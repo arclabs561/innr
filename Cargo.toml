@@ -77,3 +77,7 @@ unsafe_code = "warn"
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
 perf = { level = "warn", priority = -1 }
+# AVX-512 intrinsics were stabilized in Rust 1.89, but the code is behind
+# runtime feature detection and target_feature gates. Users on older Rust
+# still get AVX2/NEON/portable paths.
+incompatible_msrv = "allow"

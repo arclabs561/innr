@@ -99,6 +99,7 @@ impl PackedBinary {
 /// assert!(!packed.get(1));  // -0.1 <= 0.0
 /// assert!(packed.get(2));   // 0.9 > 0.0
 /// ```
+#[must_use]
 pub fn encode_binary(values: &[f32], threshold: f32) -> PackedBinary {
     let mut result = PackedBinary::zeros(values.len());
     for (i, &v) in values.iter().enumerate() {
@@ -119,6 +120,7 @@ pub fn encode_binary(values: &[f32], threshold: f32) -> PackedBinary {
 /// assert_eq!(binary_hamming(&a, &b), 2); // positions 1 and 2 differ
 /// ```
 #[inline]
+#[must_use]
 pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
     debug_assert_eq!(a.dimension, b.dimension);
     a.data
@@ -138,6 +140,7 @@ pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
 /// assert_eq!(binary_dot(&a, &b), 1); // only position 0 is 1 in both
 /// ```
 #[inline]
+#[must_use]
 pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
     debug_assert_eq!(a.dimension, b.dimension);
     a.data
@@ -158,6 +161,7 @@ pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
 /// let j = binary_jaccard(&a, &b);
 /// assert!((j - 1.0 / 3.0).abs() < 1e-6);
 /// ```
+#[must_use]
 pub fn binary_jaccard(a: &PackedBinary, b: &PackedBinary) -> f32 {
     let intersection = binary_dot(a, b);
     let union = a
@@ -507,7 +511,7 @@ mod proptests {
         #[test]
         fn proptest_jaccard_range((a, b) in arb_packed_binary_pair()) {
             let j = binary_jaccard(&a, &b);
-            prop_assert!(j >= 0.0 && j <= 1.0,
+            prop_assert!((0.0..=1.0).contains(&j),
                 "jaccard {} not in [0, 1]", j);
         }
 

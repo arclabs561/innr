@@ -135,12 +135,6 @@ pub const MIN_DIM_SIMD: usize = 16;
 /// Used by [`cosine`] to avoid division by zero.
 pub const NORM_EPSILON: f32 = 1e-9;
 
-/// Cross-lingual alignment constant for L1-stable center mapping.
-///
-/// Research indicates that L1 (Manhattan) distance provides better stability
-/// for aligning box centers across multilingual latent spaces than L2.
-pub const L1_ALIGNMENT_EPSILON: f32 = 1e-4;
-
 #[cfg(test)]
 mod tests {
     use super::*;

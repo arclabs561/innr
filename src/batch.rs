@@ -58,10 +58,6 @@
 //! - Loop overhead (too few → iteration cost)
 //! - SIMD width (AVX2 = 8 floats, AVX-512 = 16 floats)
 
-/// Default block size for batch operations.
-/// 8 floats = one AVX2 register, good balance for most CPUs.
-pub const DEFAULT_BLOCK_SIZE: usize = 8;
-
 /// Vertical (columnar) storage for a batch of vectors.
 ///
 /// Stores vectors in dimension-major order for efficient batch processing.
@@ -165,6 +161,7 @@ impl VerticalBatch {
     ///
     /// Caller must ensure `dim < self.dimension` and `vec_idx < self.num_vectors`.
     #[inline]
+    #[allow(unsafe_code)]
     pub unsafe fn get_unchecked(&self, dim: usize, vec_idx: usize) -> f32 {
         *self.data.get_unchecked(dim * self.num_vectors + vec_idx)
     }
@@ -205,6 +202,7 @@ impl VerticalBatch {
 /// ```
 ///
 /// This processes memory sequentially and auto-vectorizes well.
+#[must_use]
 pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
     debug_assert_eq!(query.len(), batch.dimension);
 
@@ -225,6 +223,7 @@ pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
 }
 
 /// Compute dot products from query to all vectors in batch.
+#[must_use]
 pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
     debug_assert_eq!(query.len(), batch.dimension);
 
@@ -261,6 +260,7 @@ pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
 /// # Returns
 ///
 /// Vector of (index, squared_distance) pairs for vectors within threshold.
+#[must_use]
 pub fn batch_l2_squared_pruning(
     query: &[f32],
     batch: &VerticalBatch,
@@ -322,6 +322,7 @@ pub struct BatchKnnResult {
 /// Uses incremental distance computation with pruning: once we have k
 /// candidates, we can skip vectors whose partial distance exceeds the
 /// current k-th best.
+#[must_use]
 pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
     debug_assert_eq!(query.len(), batch.dimension);
 
@@ -356,6 +357,7 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
 ///
 /// This is more efficient than full pruning when the warmup phase
 /// establishes a good distance bound quickly.
+#[must_use]
 pub fn batch_knn_adaptive(
     query: &[f32],
     batch: &VerticalBatch,
@@ -467,6 +469,7 @@ pub fn batch_knn_adaptive(
 }
 
 /// Norms for batch of vectors (precomputed for cosine distance).
+#[must_use]
 pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
     let mut norms = vec![0.0f32; batch.num_vectors];
 
@@ -485,6 +488,7 @@ pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
 }
 
 /// Compute cosine similarities from query to all vectors.
+#[must_use]
 pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<f32> {
     debug_assert_eq!(norms.len(), batch.num_vectors);
 
@@ -697,6 +701,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_get_unchecked_matches_get() {
         let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
         let batch = VerticalBatch::from_rows(&vectors);

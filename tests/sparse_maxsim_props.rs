@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 #[cfg(all(test, feature = "sparse"))]
 mod sparse_maxsim_props {
     use innr::sparse_maxsim;

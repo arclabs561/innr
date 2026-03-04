@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 //! aarch64 SIMD implementations using NEON.
 //!
 //! NEON is always available on aarch64, so no runtime detection needed.

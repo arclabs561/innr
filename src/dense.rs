@@ -54,6 +54,7 @@ const MIN_DIM_AVX512: usize = 64;
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn dot(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(
         a.len(),
@@ -400,7 +401,7 @@ pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
     dot(phi, psi) / (d as f32).sqrt()
 }
 
-/// Tensor (outer) product of two vectors (Foundation for 2026 Rotors).
+/// Tensor (outer) product of two vectors.
 ///
 /// Computes the full tensor product: all pairs `a[i] * b[j]`, returned as a
 /// flat row-major vector of length `a.len() * b.len()`.
@@ -408,6 +409,7 @@ pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
 /// Note: this computes the full tensor product, not the antisymmetric exterior
 /// (wedge) product from Clifford/geometric algebra.
 #[inline]
+#[must_use]
 pub fn geometric_outer_product(a: &[f32], b: &[f32]) -> Vec<f32> {
     let mut res = Vec::with_capacity(a.len() * b.len());
     for &ai in a {

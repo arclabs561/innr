@@ -60,6 +60,7 @@ fn from_flat_matches_from_rows() {
 }
 
 #[test]
+#[allow(unsafe_code)]
 fn get_unchecked_matches_get() {
     let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
     let batch = VerticalBatch::from_rows(&vectors);

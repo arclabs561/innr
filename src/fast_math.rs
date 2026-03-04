@@ -91,6 +91,7 @@ pub fn fast_rsqrt_precise(x: f32) -> f32 {
 /// assert!((c - 0.707).abs() < 0.01);
 /// ```
 #[inline]
+#[must_use]
 pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
     let n = a.len().min(b.len());
@@ -100,9 +101,7 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
     let mut aa = 0.0f32;
     let mut bb = 0.0f32;
 
-    for i in 0..n {
-        let ai = unsafe { *a.get_unchecked(i) };
-        let bi = unsafe { *b.get_unchecked(i) };
+    for (&ai, &bi) in a[..n].iter().zip(b[..n].iter()) {
         ab += ai * bi;
         aa += ai * ai;
         bb += bi * bi;
@@ -121,6 +120,7 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// More numerically stable formulation that avoids catastrophic cancellation.
 #[inline]
+#[must_use]
 pub fn fast_cosine_distance(a: &[f32], b: &[f32]) -> f32 {
     1.0 - fast_cosine(a, b)
 }
@@ -130,7 +130,8 @@ pub fn fast_cosine_distance(a: &[f32], b: &[f32]) -> f32 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
-pub mod x86_64 {
+#[allow(unsafe_code)]
+pub(crate) mod x86_64 {
     //! AVX2/AVX-512 fast cosine using rsqrt instructions.
 
     /// AVX-512 fast cosine with hardware rsqrt + Newton-Raphson.
@@ -311,7 +312,8 @@ pub mod x86_64 {
 }
 
 #[cfg(target_arch = "aarch64")]
-pub mod aarch64 {
+#[allow(unsafe_code)]
+pub(crate) mod aarch64 {
     //! NEON fast cosine using vrsqrte + Newton-Raphson.
 
     /// NEON fast cosine with 4-way unrolled accumulation and hardware rsqrt.
@@ -482,6 +484,8 @@ pub mod aarch64 {
 /// assert!((sim - 1.0).abs() < 0.02); // approximate, within ~1%
 /// ```
 #[inline]
+#[must_use]
+#[allow(unsafe_code)]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());

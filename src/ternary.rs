@@ -136,6 +136,7 @@ impl PackedTernary {
 ///
 /// Values above `threshold` become +1, below `-threshold` become -1,
 /// values in between become 0.
+#[must_use]
 pub fn encode_ternary(values: &[f32], threshold: f32) -> PackedTernary {
     let mut result = PackedTernary::zeros(values.len());
     for (i, &v) in values.iter().enumerate() {
@@ -162,6 +163,8 @@ pub fn encode_ternary(values: &[f32], threshold: f32) -> PackedTernary {
 /// 4. Different-sign matches: (pos_a & neg_b) | (neg_a & pos_b)
 /// 5. Contribution = popcount(same) - popcount(diff)
 #[inline]
+#[must_use]
+#[allow(unsafe_code)]
 pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
     debug_assert_eq!(a.dimension, b.dimension);
     debug_assert_eq!(a.data.len(), b.data.len());
@@ -221,6 +224,7 @@ fn ternary_dot_portable(a: &[u64], b: &[u64]) -> i32 {
 /// x86_64 POPCNT implementation.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "popcnt")]
+#[allow(unsafe_code)]
 unsafe fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
     use std::arch::x86_64::_popcnt64;
 
@@ -251,6 +255,7 @@ unsafe fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
 /// More accurate than symmetric ternary comparison since query
 /// retains full precision.
 #[inline]
+#[must_use]
 pub fn asymmetric_dot(query: &[f32], ternary: &PackedTernary) -> f32 {
     debug_assert_eq!(query.len(), ternary.dimension);
 
@@ -265,6 +270,7 @@ pub fn asymmetric_dot(query: &[f32], ternary: &PackedTernary) -> f32 {
 /// Batch asymmetric dot products.
 ///
 /// Computes query against multiple ternary vectors efficiently.
+#[must_use]
 pub fn batch_asymmetric_dot(query: &[f32], vectors: &[PackedTernary]) -> Vec<f32> {
     vectors.iter().map(|v| asymmetric_dot(query, v)).collect()
 }
@@ -272,6 +278,7 @@ pub fn batch_asymmetric_dot(query: &[f32], vectors: &[PackedTernary]) -> Vec<f32
 /// Hamming distance for ternary vectors.
 ///
 /// Counts positions where values differ (ignoring zeros).
+#[must_use]
 pub fn ternary_hamming(a: &PackedTernary, b: &PackedTernary) -> u32 {
     debug_assert_eq!(a.dimension, b.dimension);
 
@@ -297,6 +304,7 @@ pub fn ternary_hamming(a: &PackedTernary, b: &PackedTernary) -> u32 {
 }
 
 /// Sparsity (fraction of zeros) in ternary vector.
+#[must_use]
 pub fn sparsity(v: &PackedTernary) -> f32 {
     let nnz = v.nnz();
     1.0 - (nnz as f32 / v.dimension as f32)
@@ -821,7 +829,7 @@ mod proptests {
         #[test]
         fn proptest_sparsity_range(a in arb_packed_ternary()) {
             let s = sparsity(&a);
-            prop_assert!(s >= 0.0 && s <= 1.0,
+            prop_assert!((0.0..=1.0).contains(&s),
                 "sparsity {} not in [0, 1]", s);
         }
     }

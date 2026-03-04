@@ -95,6 +95,7 @@ use crate::arch;
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     if query_tokens.is_empty() || doc_tokens.is_empty() {
         return 0.0;

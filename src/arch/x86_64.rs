@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 //! x86_64 SIMD implementations using AVX2/AVX-512 and FMA.
 //!
 //! These functions are unsafe and require runtime feature detection

@@ -42,6 +42,9 @@ let n = norm(&a);         // 1.0
 | `l1_distance` | Manhattan distance |
 | `angular_distance` | Angular distance (arccos-based) |
 | `pool_mean` | Mean pooling over a set of vectors |
+| `bilinear` | Scaled dot product (`phi^T * psi / sqrt(d)`) |
+| `geometric_outer_product` | Tensor (outer) product of two vectors |
+| `metric_residual` | MRN distance (symmetric + asymmetric components) |
 
 ### Matryoshka embeddings
 
@@ -78,6 +81,7 @@ let n = norm(&a);         // 1.0
 | `fast_cosine` | Approximate cosine via `fast_rsqrt` |
 | `fast_rsqrt` | Fast inverse square root (hardware rsqrt + Newton-Raphson) |
 | `fast_rsqrt_precise` | Two-iteration Newton-Raphson variant |
+| `fast_cosine_distance` | `1 - fast_cosine` |
 
 ### Batch operations (PDX-style columnar layout)
 
@@ -90,6 +94,8 @@ let n = norm(&a);         // 1.0
 | `batch::batch_norms` | Norms for all vectors in the batch |
 | `batch::batch_knn` | Exact k-NN over a batch |
 | `batch::batch_knn_adaptive` | Adaptive early-exit k-NN |
+| `batch::batch_l2_squared_pruning` | Batch L2 with early termination |
+| `batch::BatchKnnResult` | k-NN result (indices + distances) |
 
 ### Metric traits
 

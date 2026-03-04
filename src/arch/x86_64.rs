@@ -265,6 +265,7 @@ pub unsafe fn dot_avx2(a: &[f32], b: &[f32]) -> f32 {
 /// Base algorithm for high-performance sparse dot products.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
+#[allow(dead_code)]
 pub unsafe fn sparse_match_indices_avx512(a_idx: &[u32], b_idx: &[u32]) -> Vec<(usize, usize)> {
     use std::arch::x86_64::{_mm512_loadu_si512, _mm512_mask_cmpeq_epi32_mask, _mm512_set1_epi32};
 

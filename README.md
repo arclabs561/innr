@@ -14,7 +14,7 @@ Dual-licensed under MIT or Apache-2.0.
 
 ```toml
 [dependencies]
-innr = "0.1.3"
+innr = "0.1.6"
 ```
 
 ```rust
@@ -170,12 +170,6 @@ Generate flamegraphs (requires `cargo-flamegraph`):
 ```bash
 cargo test -p innr
 ```
-
-## See also
-
-- [`kuji`](https://crates.io/crates/kuji) -- stochastic sampling primitives (Gumbel-max, reservoir)
-- [`subsume`](https://crates.io/crates/subsume) -- geometric box embeddings (uses `innr` for similarity)
-- [`anno`](https://crates.io/crates/anno) -- information extraction (NER, coreference)
 
 ## License
 

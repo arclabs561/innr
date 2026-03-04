@@ -292,27 +292,21 @@ pub unsafe fn sparse_match_indices_avx512(a_idx: &[u32], b_idx: &[u32]) -> Vec<(
                 matches.push((i + match_idx, j));
                 i += match_idx + 1;
                 j += 1;
+            } else if a_idx[i + 15] < target_b {
+                i += 16;
+            } else if target_b < a_idx[i] {
+                j += 1;
             } else {
-                if a_idx[i + 15] < target_b {
-                    i += 16;
-                } else {
-                    if target_b < a_idx[i] {
-                        j += 1;
-                    } else {
-                        i += 1;
-                    }
-                }
+                i += 1;
             }
+        } else if a_idx[i] == b_idx[j] {
+            matches.push((i, j));
+            i += 1;
+            j += 1;
+        } else if a_idx[i] < b_idx[j] {
+            i += 1;
         } else {
-            if a_idx[i] == b_idx[j] {
-                matches.push((i, j));
-                i += 1;
-                j += 1;
-            } else if a_idx[i] < b_idx[j] {
-                i += 1;
-            } else {
-                j += 1;
-            }
+            j += 1;
         }
     }
     matches

@@ -171,6 +171,32 @@ Generate flamegraphs (requires `cargo-flamegraph`):
 ./scripts/profile.sh dense
 ```
 
+## Examples
+
+[**01_basic_ops.rs**](examples/01_basic_ops.rs) -- The three core similarity metrics (dot product, cosine, L2 distance) and their mathematical relationships. Proves the identity `L2^2(a,b) = 2(1 - cosine(a,b))` for normalized vectors, showing that cosine and L2 are interchangeable for ranking.
+
+[**batch_demo.rs**](examples/batch_demo.rs) -- PDX-style columnar layout for batch retrieval. Transposes 10K vectors (128d) into column-major order, runs 100 queries, and verifies k-NN results against brute-force. Demonstrates the cache-friendly memory access pattern that enables auto-vectorization.
+
+[**binary_demo.rs**](examples/binary_demo.rs) -- Binary (1-bit) quantization for first-stage retrieval. Quantizes 384d vectors to packed bits (32x memory reduction: 150 MB vs 4.6 GB for 1M documents), computes Hamming distance and binary dot product, and measures recall@10 against full-precision search.
+
+[**fast_math_demo.rs**](examples/fast_math_demo.rs) -- Newton-Raphson rsqrt approximation for fast cosine similarity. Benchmarks the hot path in ANN search (640 distance calls per query in HNSW at 1M scale), measures 3-10x speedup over standard cosine at `<1e-4` error, and shows architecture-specific SIMD dispatch.
+
+[**matryoshka_search.rs**](examples/matryoshka_search.rs) -- Two-stage retrieval using Matryoshka embeddings. Uses a 128d prefix for coarse filtering (100 candidates from 10K corpus), then rescores with full 768d vectors to produce the final top-10. Measures recall and speedup vs single-stage search.
+
+[**maxsim_colbert.rs**](examples/maxsim_colbert.rs) -- ColBERT-style late interaction scoring. Computes MaxSim (sum of per-query-token maximum similarities across document tokens) for 32 query tokens x 128 doc tokens at 128d. Demonstrates non-commutativity and batch scoring of 1000 documents.
+
+[**ternary_demo.rs**](examples/ternary_demo.rs) -- Ternary (1.58-bit) quantization for extreme compression. Quantizes 768d vectors to `{-1, 0, +1}` (16-20x memory reduction: 90 MB vs 3.1 GB for 1M documents), measures recall trade-offs, and analyzes sparsity patterns.
+
+```bash
+cargo run --example 01_basic_ops
+cargo run --example batch_demo
+cargo run --example binary_demo
+cargo run --example fast_math_demo
+cargo run --example matryoshka_search
+cargo run --example maxsim_colbert --features maxsim
+cargo run --example ternary_demo
+```
+
 ## Tests
 
 ```bash

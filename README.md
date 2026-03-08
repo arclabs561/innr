@@ -4,17 +4,15 @@
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
 [![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
-SIMD-accelerated vector similarity primitives. Pure Rust, zero runtime dependencies.
+Vector similarity primitives with SIMD dispatch (AVX-512, AVX2+FMA, NEON). Pure Rust, zero dependencies, MSRV 1.75.
 
-Unlike simsimd (C bindings) or ndarray (full linear algebra), innr is pure Rust, zero-dep, and focused on the similarity primitives that retrieval and embedding systems need.
-
-Dual-licensed under MIT or Apache-2.0.
+Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
 
 ## Quickstart
 
 ```toml
 [dependencies]
-innr = "0.1.6"
+innr = "0.1.7"
 ```
 
 ```rust

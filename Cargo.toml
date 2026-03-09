@@ -37,8 +37,9 @@ full = ["maxsim", "sparse"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-rand = "0.9"
 proptest = "1.5"
+qntz = { version = "0.1", features = ["rabitq"] }
+rand = "0.9"
 
 [[example]]
 name = "maxsim_colbert"

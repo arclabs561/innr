@@ -44,8 +44,12 @@
 /// let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
 /// assert!((result - 3.0).abs() < 1e-6);
 /// ```
+#[cfg(target_arch = "x86_64")]
+use crate::arch;
+
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_values: &[f32]) -> f32 {
     debug_assert_eq!(
         a_indices.len(),
@@ -58,8 +62,26 @@ pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_valu
         "sparse_dot: b indices/values length mismatch"
     );
 
-    // For small vectors, use portable implementation directly
-    // (SIMD overhead not worthwhile)
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Use AVX-512 accelerated index matching when available and inputs are large enough.
+        // The threshold of 16 ensures the SIMD match scan has enough elements to offset
+        // the overhead of collecting match pairs and the indirect value lookups.
+        if a_indices.len() >= 16
+            && b_indices.len() >= 1
+            && is_x86_feature_detected!("avx512f")
+        {
+            // SAFETY: AVX-512F verified via runtime detection.
+            let matches =
+                unsafe { arch::x86_64::sparse_match_indices_avx512(a_indices, b_indices) };
+            let mut result = 0.0f32;
+            for (ai, bi) in matches {
+                result += a_values[ai] * b_values[bi];
+            }
+            return result;
+        }
+    }
+
     sparse_dot_portable(a_indices, a_values, b_indices, b_values)
 }
 

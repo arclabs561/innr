@@ -93,8 +93,14 @@ pub fn fast_rsqrt_precise(x: f32) -> f32 {
 #[inline]
 #[must_use]
 pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
-    debug_assert_eq!(a.len(), b.len());
-    let n = a.len().min(b.len());
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::fast_cosine: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    let n = a.len();
 
     // Compute three dot products in one pass for better cache locality
     let mut ab = 0.0f32;
@@ -195,6 +201,8 @@ pub(crate) mod x86_64 {
         // Handle tail
         let tail_start = chunks * 16;
         for i in tail_start..n {
+            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+            // so i is always a valid index into both a and b.
             let ai = *a.get_unchecked(i);
             let bi = *b.get_unchecked(i);
             ab += ai * bi;
@@ -283,6 +291,8 @@ pub(crate) mod x86_64 {
         // Handle tail
         let tail_start = chunks * 8;
         for i in tail_start..n {
+            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+            // so i is always a valid index into both a and b.
             let ai = *a.get_unchecked(i);
             let bi = *b.get_unchecked(i);
             ab += ai * bi;
@@ -416,6 +426,8 @@ pub(crate) mod aarch64 {
         // Scalar tail
         let tail_start = remaining_start + chunks_4 * 4;
         for i in tail_start..n {
+            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+            // so i is always a valid index into both a and b.
             let ai = *a.get_unchecked(i);
             let bi = *b.get_unchecked(i);
             ab += ai * bi;
@@ -670,5 +682,7 @@ mod tests {
     fn test_fast_rsqrt_edge_cases() {
         assert_eq!(fast_rsqrt(0.0), 0.0);
         assert_eq!(fast_rsqrt(-1.0), 0.0);
+        assert!(fast_rsqrt(f32::MAX).is_finite());
+        assert!(fast_rsqrt(f32::MIN_POSITIVE).is_finite());
     }
 }

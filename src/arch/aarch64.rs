@@ -81,6 +81,8 @@ pub unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
     // Scalar tail
     let tail_start = remaining_start + chunks_4 * 4;
     for i in tail_start..n {
+        // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+        // so i is always a valid index into both a and b.
         result += *a.get_unchecked(i) * *b.get_unchecked(i);
     }
 
@@ -97,7 +99,7 @@ pub unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
 /// NEON is always available on aarch64.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
-#[allow(dead_code)] // Public for potential external use; internal dispatch uses it conditionally
+#[cfg_attr(not(feature = "maxsim"), allow(dead_code))] // used by maxsim::maxsim() dispatch
 pub unsafe fn maxsim_neon(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     let mut total_score = 0.0;
 

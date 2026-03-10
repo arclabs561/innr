@@ -8,7 +8,7 @@
 
 #![allow(clippy::float_cmp)]
 
-use innr::{cosine, dot, l2_distance, l2_distance_squared};
+use innr::{cosine, dot, fast_cosine_dispatch, l2_distance, l2_distance_squared};
 
 // =============================================================================
 // Reference Implementations (Pure Scalar)
@@ -75,6 +75,13 @@ fn approx_eq(a: f32, b: f32, rel_eps: f32) -> bool {
 
 // =============================================================================
 // Differential Tests
+//
+// Tolerances are 1e-4 for large dimensions and 1e-5 for small dimensions.
+// The gap comes from FMA (fused multiply-add) rounding: SIMD paths use
+// hardware FMA which rounds once per multiply-add, while the scalar
+// reference rounds twice (once for multiply, once for add). Over hundreds
+// of accumulations the rounding difference compounds, requiring the
+// looser 1e-4 tolerance for high-dimensional vectors.
 // =============================================================================
 
 #[test]
@@ -180,6 +187,28 @@ fn simd_correctness_cosine() {
                 "cosine mismatch at dim={}: simd={}, ref={}",
                 dim,
                 simd_result,
+                ref_result
+            );
+        }
+    }
+}
+
+#[test]
+fn simd_correctness_fast_cosine_dispatch() {
+    for dim in [1, 8, 16, 32, 64, 128, 384, 768] {
+        for seed in 0..5 {
+            let a = test_vec(dim, seed);
+            let b = test_vec(dim, seed + 1000);
+
+            let dispatch_result = fast_cosine_dispatch(&a, &b);
+            let ref_result = ref_cosine(&a, &b);
+
+            // fast_cosine_dispatch uses rsqrt approximation, so wider tolerance
+            assert!(
+                approx_eq(dispatch_result, ref_result, 1e-2),
+                "fast_cosine_dispatch mismatch at dim={}: dispatch={}, ref={}",
+                dim,
+                dispatch_result,
                 ref_result
             );
         }

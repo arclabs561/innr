@@ -38,10 +38,9 @@ const MIN_DIM_AVX512: usize = 64;
 /// - NEON on aarch64 (always available, n >= 16)
 /// - Portable fallback otherwise
 ///
-/// # Debug Assertions
+/// # Panics
 ///
-/// In debug builds, panics if vector lengths differ. In release builds,
-/// mismatched lengths silently use the shorter length (for performance).
+/// Panics if `a.len() != b.len()`.
 ///
 /// # Example
 ///
@@ -56,10 +55,10 @@ const MIN_DIM_AVX512: usize = 64;
 #[must_use]
 #[allow(unsafe_code)]
 pub fn dot(a: &[f32], b: &[f32]) -> f32 {
-    debug_assert_eq!(
+    assert_eq!(
         a.len(),
         b.len(),
-        "dot: dimension mismatch ({} vs {})",
+        "innr::dot: slice length mismatch ({} vs {})",
         a.len(),
         b.len()
     );
@@ -338,7 +337,13 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 #[inline]
 #[must_use]
 pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
-    debug_assert_eq!(a.len(), b.len(), "l1_distance: dimension mismatch");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::l1_distance: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
 }
 
@@ -359,7 +364,13 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
 #[inline]
 #[must_use]
 pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
-    debug_assert_eq!(a.len(), b.len(), "l2_distance_squared: dimension mismatch");
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::l2_distance_squared: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
 
     // Expanded form: ||a - b||² = ||a||² + ||b||² - 2<a,b>
     // Direct computation avoids allocation for (a - b).
@@ -626,6 +637,36 @@ mod tests {
         // (-1)*(-4) + (-2)*(-5) + (-3)*(-6) = 4 + 10 + 18 = 32
         let result = dot(&a, &b);
         assert!((result - 32.0).abs() < 1e-6);
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::dot: slice length mismatch")]
+    fn dot_panics_on_length_mismatch() {
+        let _ = dot(&[1.0, 2.0], &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::l1_distance: slice length mismatch")]
+    fn l1_distance_panics_on_length_mismatch() {
+        let _ = l1_distance(&[1.0], &[1.0, 2.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::l2_distance_squared: slice length mismatch")]
+    fn l2_distance_squared_panics_on_length_mismatch() {
+        let _ = l2_distance_squared(&[1.0], &[1.0, 2.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::l2_distance_squared: slice length mismatch")]
+    fn l2_distance_panics_on_length_mismatch() {
+        let _ = l2_distance(&[1.0], &[1.0, 2.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::dot: slice length mismatch")]
+    fn cosine_panics_on_length_mismatch() {
+        let _ = cosine(&[1.0, 2.0], &[1.0]);
     }
 
     #[test]

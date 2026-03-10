@@ -298,7 +298,9 @@ fn test_dot_at_simd_boundaries() {
         let result = innr::dot(&a, &b);
         let expected = dot_reference(&a, &b);
 
-        let tolerance = expected.abs() * 1e-4 + 1e-5;
+        // FMA vs non-FMA rounding compounds over many accumulations;
+        // 5e-4 relative tolerance accommodates the worst case at dim=257.
+        let tolerance = expected.abs() * 5e-4 + 1e-5;
         assert!(
             (result - expected).abs() < tolerance,
             "Dot at size {}: {} vs {} (diff: {})",

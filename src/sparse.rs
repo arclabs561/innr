@@ -67,10 +67,7 @@ pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_valu
         // Use AVX-512 accelerated index matching when available and inputs are large enough.
         // The threshold of 16 ensures the SIMD match scan has enough elements to offset
         // the overhead of collecting match pairs and the indirect value lookups.
-        if a_indices.len() >= 16
-            && b_indices.len() >= 1
-            && is_x86_feature_detected!("avx512f")
-        {
+        if a_indices.len() >= 16 && b_indices.len() >= 1 && is_x86_feature_detected!("avx512f") {
             // SAFETY: AVX-512F verified via runtime detection.
             let matches =
                 unsafe { arch::x86_64::sparse_match_indices_avx512(a_indices, b_indices) };

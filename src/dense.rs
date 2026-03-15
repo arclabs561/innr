@@ -372,15 +372,12 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    // Expanded form: ||a - b||² = ||a||² + ||b||² - 2<a,b>
-    // Direct computation avoids allocation for (a - b).
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| {
-            let diff = x - y;
-            diff * diff
-        })
-        .sum()
+    // Expanded: ||a - b||² = ||a||² + ||b||² - 2<a,b>
+    // Uses SIMD-accelerated dot() for all three terms.
+    let aa = dot(a, a);
+    let bb = dot(b, b);
+    let ab = dot(a, b);
+    (aa + bb - 2.0 * ab).max(0.0)
 }
 
 /// Bilinear product: `phi^T * psi / sqrt(d)`.

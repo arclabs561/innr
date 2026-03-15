@@ -70,5 +70,36 @@ mod maxsim_simd_props {
                 dim, query_vecs.len(), doc_vecs.len(), expected, actual, (expected - actual).abs()
             );
         }
+
+        /// MaxSim of a set against itself should be non-negative (each token's
+        /// best dot-product match includes itself, so dot >= 0 for self-match).
+        #[test]
+        fn maxsim_self_is_nonnegative(
+            dim in 16usize..64,
+            data in proptest::collection::vec(0.0f32..1.0, 16..640),
+        ) {
+            let mut vecs = Vec::new();
+            for chunk in data.chunks(dim) {
+                if chunk.len() == dim {
+                    vecs.push(chunk.to_vec());
+                }
+            }
+            if vecs.is_empty() {
+                vecs.push(vec![0.1; dim]);
+            }
+            let refs: Vec<&[f32]> = vecs.iter().map(|v| v.as_slice()).collect();
+            let score = maxsim(&refs, &refs);
+            prop_assert!(score >= -1e-6, "self-maxsim negative: {}", score);
+        }
+
+        /// MaxSim with empty query or doc returns 0.
+        #[test]
+        fn maxsim_empty_is_zero(dim in 16usize..64) {
+            let v = vec![0.5f32; dim];
+            let refs = vec![v.as_slice()];
+            let empty: Vec<&[f32]> = vec![];
+            prop_assert_eq!(maxsim(&empty, &refs), 0.0);
+            prop_assert_eq!(maxsim(&refs, &empty), 0.0);
+        }
     }
 }

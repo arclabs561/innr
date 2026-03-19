@@ -86,8 +86,8 @@ mod maxsim;
 
 // Re-export core operations
 pub use dense::{
-    angular_distance, cosine, dot, dot_portable, l1_distance, l2_distance, l2_distance_squared,
-    matryoshka_cosine, matryoshka_dot, norm,
+    angular_distance, cosine, cosine_portable, dot, dot_portable, l1_distance, l2_distance,
+    l2_distance_squared, matryoshka_cosine, matryoshka_dot, norm,
 };
 
 // Re-export binary operations

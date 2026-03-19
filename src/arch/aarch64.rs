@@ -201,6 +201,198 @@ pub unsafe fn l2_squared_neon(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// NEON L1 (Manhattan) distance: `Σ|a[i] - b[i]|`.
+///
+/// Uses `vabdq_f32` (absolute difference) for fused sub+abs in one instruction.
+/// 4-way unrolled for pipeline efficiency.
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn l1_neon(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::aarch64::{
+        float32x4_t, vabdq_f32, vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 16 floats per iteration
+    let chunks_16 = n / 16;
+    let mut sum0: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum1: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum2: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum3: float32x4_t = vdupq_n_f32(0.0);
+
+    for i in 0..chunks_16 {
+        let base = i * 16;
+        let va0 = vld1q_f32(a_ptr.add(base));
+        let vb0 = vld1q_f32(b_ptr.add(base));
+        let va1 = vld1q_f32(a_ptr.add(base + 4));
+        let vb1 = vld1q_f32(b_ptr.add(base + 4));
+        let va2 = vld1q_f32(a_ptr.add(base + 8));
+        let vb2 = vld1q_f32(b_ptr.add(base + 8));
+        let va3 = vld1q_f32(a_ptr.add(base + 12));
+        let vb3 = vld1q_f32(b_ptr.add(base + 12));
+
+        // vabdq_f32: absolute difference in one instruction
+        sum0 = vaddq_f32(sum0, vabdq_f32(va0, vb0));
+        sum1 = vaddq_f32(sum1, vabdq_f32(va1, vb1));
+        sum2 = vaddq_f32(sum2, vabdq_f32(va2, vb2));
+        sum3 = vaddq_f32(sum3, vabdq_f32(va3, vb3));
+    }
+
+    // Combine accumulators
+    let sum01 = vaddq_f32(sum0, sum1);
+    let sum23 = vaddq_f32(sum2, sum3);
+    let sum_all = vaddq_f32(sum01, sum23);
+    let mut result = vaddvq_f32(sum_all);
+
+    // Handle remaining 4-float chunks
+    let remaining_start = chunks_16 * 16;
+    let remaining = n - remaining_start;
+    let chunks_4 = remaining / 4;
+
+    let mut sum: float32x4_t = vdupq_n_f32(0.0);
+    for i in 0..chunks_4 {
+        let offset = remaining_start + i * 4;
+        let va = vld1q_f32(a_ptr.add(offset));
+        let vb = vld1q_f32(b_ptr.add(offset));
+        sum = vaddq_f32(sum, vabdq_f32(va, vb));
+    }
+    result += vaddvq_f32(sum);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_4 * 4;
+    for i in tail_start..n {
+        result += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
+    }
+
+    result
+}
+
+/// NEON fused cosine similarity: single-pass dot(a,b), norm(a)^2, norm(b)^2.
+///
+/// Accumulates all three products in one pass over memory, then uses
+/// exact sqrt/div for IEEE-correct normalization. ~3x less memory bandwidth
+/// than the 3-pass approach (dot + norm + norm).
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn cosine_neon(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::aarch64::{
+        float32x4_t, vaddq_f32, vaddvq_f32, vdupq_n_f32, vfmaq_f32, vld1q_f32,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 16 floats per iteration, 3 accumulators each
+    let chunks_16 = n / 16;
+    let mut ab0: float32x4_t = vdupq_n_f32(0.0);
+    let mut ab1: float32x4_t = vdupq_n_f32(0.0);
+    let mut ab2: float32x4_t = vdupq_n_f32(0.0);
+    let mut ab3: float32x4_t = vdupq_n_f32(0.0);
+    let mut aa0: float32x4_t = vdupq_n_f32(0.0);
+    let mut aa1: float32x4_t = vdupq_n_f32(0.0);
+    let mut aa2: float32x4_t = vdupq_n_f32(0.0);
+    let mut aa3: float32x4_t = vdupq_n_f32(0.0);
+    let mut bb0: float32x4_t = vdupq_n_f32(0.0);
+    let mut bb1: float32x4_t = vdupq_n_f32(0.0);
+    let mut bb2: float32x4_t = vdupq_n_f32(0.0);
+    let mut bb3: float32x4_t = vdupq_n_f32(0.0);
+
+    for i in 0..chunks_16 {
+        let base = i * 16;
+        let va0 = vld1q_f32(a_ptr.add(base));
+        let vb0 = vld1q_f32(b_ptr.add(base));
+        let va1 = vld1q_f32(a_ptr.add(base + 4));
+        let vb1 = vld1q_f32(b_ptr.add(base + 4));
+        let va2 = vld1q_f32(a_ptr.add(base + 8));
+        let vb2 = vld1q_f32(b_ptr.add(base + 8));
+        let va3 = vld1q_f32(a_ptr.add(base + 12));
+        let vb3 = vld1q_f32(b_ptr.add(base + 12));
+
+        ab0 = vfmaq_f32(ab0, va0, vb0);
+        ab1 = vfmaq_f32(ab1, va1, vb1);
+        ab2 = vfmaq_f32(ab2, va2, vb2);
+        ab3 = vfmaq_f32(ab3, va3, vb3);
+
+        aa0 = vfmaq_f32(aa0, va0, va0);
+        aa1 = vfmaq_f32(aa1, va1, va1);
+        aa2 = vfmaq_f32(aa2, va2, va2);
+        aa3 = vfmaq_f32(aa3, va3, va3);
+
+        bb0 = vfmaq_f32(bb0, vb0, vb0);
+        bb1 = vfmaq_f32(bb1, vb1, vb1);
+        bb2 = vfmaq_f32(bb2, vb2, vb2);
+        bb3 = vfmaq_f32(bb3, vb3, vb3);
+    }
+
+    // Combine the 4 accumulators
+    let ab_sum = vaddq_f32(vaddq_f32(ab0, ab1), vaddq_f32(ab2, ab3));
+    let aa_sum = vaddq_f32(vaddq_f32(aa0, aa1), vaddq_f32(aa2, aa3));
+    let bb_sum = vaddq_f32(vaddq_f32(bb0, bb1), vaddq_f32(bb2, bb3));
+
+    let mut ab = vaddvq_f32(ab_sum);
+    let mut aa = vaddvq_f32(aa_sum);
+    let mut bb = vaddvq_f32(bb_sum);
+
+    // Handle remaining 4-float chunks
+    let remaining_start = chunks_16 * 16;
+    let remaining = n - remaining_start;
+    let chunks_4 = remaining / 4;
+
+    let mut ab_tail: float32x4_t = vdupq_n_f32(0.0);
+    let mut aa_tail: float32x4_t = vdupq_n_f32(0.0);
+    let mut bb_tail: float32x4_t = vdupq_n_f32(0.0);
+
+    for i in 0..chunks_4 {
+        let offset = remaining_start + i * 4;
+        let va = vld1q_f32(a_ptr.add(offset));
+        let vb = vld1q_f32(b_ptr.add(offset));
+        ab_tail = vfmaq_f32(ab_tail, va, vb);
+        aa_tail = vfmaq_f32(aa_tail, va, va);
+        bb_tail = vfmaq_f32(bb_tail, vb, vb);
+    }
+
+    ab += vaddvq_f32(ab_tail);
+    aa += vaddvq_f32(aa_tail);
+    bb += vaddvq_f32(bb_tail);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_4 * 4;
+    for i in tail_start..n {
+        let ai = *a.get_unchecked(i);
+        let bi = *b.get_unchecked(i);
+        ab += ai * bi;
+        aa += ai * ai;
+        bb += bi * bi;
+    }
+
+    // Exact normalization (IEEE sqrt + div)
+    if aa > crate::NORM_EPSILON && bb > crate::NORM_EPSILON {
+        ab / (aa.sqrt() * bb.sqrt())
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -228,6 +420,67 @@ mod tests {
                 expected,
                 actual,
                 rel_error
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_l1_neon_correctness() {
+        use super::*;
+
+        for size in [1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 128, 256] {
+            let a: Vec<f32> = (0..size).map(|i| (i as f32) * 0.1).collect();
+            let b: Vec<f32> = (0..size).map(|i| (i as f32) * 0.2).collect();
+
+            let expected: f32 = a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum();
+            let actual = unsafe { l1_neon(&a, &b) };
+
+            let rel_error = if expected.abs() > 1e-6 {
+                (actual - expected).abs() / expected.abs()
+            } else {
+                (actual - expected).abs()
+            };
+            assert!(
+                rel_error < 1e-5,
+                "L1 size={}: expected={}, actual={}, rel_error={}",
+                size,
+                expected,
+                actual,
+                rel_error
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_cosine_neon_correctness() {
+        use super::*;
+
+        for size in [1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 128, 256] {
+            let a: Vec<f32> = (0..size).map(|i| ((i * 7) as f32).sin()).collect();
+            let b: Vec<f32> = (0..size).map(|i| ((i * 11) as f32).cos()).collect();
+
+            // Reference: scalar cosine
+            let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            let aa: f32 = a.iter().map(|x| x * x).sum();
+            let bb: f32 = b.iter().map(|x| x * x).sum();
+            let expected = if aa > 1e-9 && bb > 1e-9 {
+                ab / (aa.sqrt() * bb.sqrt())
+            } else {
+                0.0
+            };
+
+            let actual = unsafe { cosine_neon(&a, &b) };
+
+            let diff = (actual - expected).abs();
+            assert!(
+                diff < 1e-5,
+                "size={}: expected={}, actual={}, diff={}",
+                size,
+                expected,
+                actual,
+                diff
             );
         }
     }

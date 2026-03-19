@@ -457,6 +457,457 @@ pub unsafe fn l2_squared_avx2(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// AVX-512 L1 (Manhattan) distance: `Σ|a[i] - b[i]|`.
+///
+/// Uses `_mm512_abs_ps` (via bit-mask AND) for branchless absolute value.
+/// 4-way unrolled with masked tail handling.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn l1_avx512(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m512, __mmask16, _mm512_abs_ps, _mm512_add_ps, _mm512_loadu_ps, _mm512_maskz_loadu_ps,
+        _mm512_reduce_add_ps, _mm512_setzero_ps, _mm512_sub_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_64 = n / 64;
+    let mut sum0: __m512 = _mm512_setzero_ps();
+    let mut sum1: __m512 = _mm512_setzero_ps();
+    let mut sum2: __m512 = _mm512_setzero_ps();
+    let mut sum3: __m512 = _mm512_setzero_ps();
+
+    for i in 0..chunks_64 {
+        let base = i * 64;
+        let d0 = _mm512_abs_ps(_mm512_sub_ps(
+            _mm512_loadu_ps(a_ptr.add(base)),
+            _mm512_loadu_ps(b_ptr.add(base)),
+        ));
+        let d1 = _mm512_abs_ps(_mm512_sub_ps(
+            _mm512_loadu_ps(a_ptr.add(base + 16)),
+            _mm512_loadu_ps(b_ptr.add(base + 16)),
+        ));
+        let d2 = _mm512_abs_ps(_mm512_sub_ps(
+            _mm512_loadu_ps(a_ptr.add(base + 32)),
+            _mm512_loadu_ps(b_ptr.add(base + 32)),
+        ));
+        let d3 = _mm512_abs_ps(_mm512_sub_ps(
+            _mm512_loadu_ps(a_ptr.add(base + 48)),
+            _mm512_loadu_ps(b_ptr.add(base + 48)),
+        ));
+
+        sum0 = _mm512_add_ps(sum0, d0);
+        sum1 = _mm512_add_ps(sum1, d1);
+        sum2 = _mm512_add_ps(sum2, d2);
+        sum3 = _mm512_add_ps(sum3, d3);
+    }
+
+    let sum_all = _mm512_add_ps(_mm512_add_ps(sum0, sum1), _mm512_add_ps(sum2, sum3));
+    let mut result = _mm512_reduce_add_ps(sum_all);
+
+    // Remaining elements with masked loads
+    let remaining_start = chunks_64 * 64;
+    let remaining = n - remaining_start;
+
+    if remaining > 0 {
+        let chunks_16 = remaining / 16;
+        let mut sum_rem: __m512 = _mm512_setzero_ps();
+
+        for i in 0..chunks_16 {
+            let offset = remaining_start + i * 16;
+            let d = _mm512_abs_ps(_mm512_sub_ps(
+                _mm512_loadu_ps(a_ptr.add(offset)),
+                _mm512_loadu_ps(b_ptr.add(offset)),
+            ));
+            sum_rem = _mm512_add_ps(sum_rem, d);
+        }
+
+        let tail_count = remaining % 16;
+        if tail_count > 0 {
+            let tail_offset = remaining_start + chunks_16 * 16;
+            let mask: __mmask16 = ((1u32 << tail_count) - 1) as __mmask16;
+            let va = _mm512_maskz_loadu_ps(mask, a_ptr.add(tail_offset));
+            let vb = _mm512_maskz_loadu_ps(mask, b_ptr.add(tail_offset));
+            let d = _mm512_abs_ps(_mm512_sub_ps(va, vb));
+            sum_rem = _mm512_add_ps(sum_rem, d);
+        }
+
+        result += _mm512_reduce_add_ps(sum_rem);
+    }
+
+    result
+}
+
+/// AVX2 L1 (Manhattan) distance: `Σ|a[i] - b[i]|`.
+///
+/// Uses sign-bit mask AND to compute absolute value without branching.
+/// 4-way unrolled.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn l1_avx2(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m256, _mm256_add_ps, _mm256_andnot_ps, _mm256_castps256_ps128, _mm256_extractf128_ps,
+        _mm256_loadu_ps, _mm256_set1_ps, _mm256_setzero_ps, _mm256_sub_ps, _mm_add_ps, _mm_add_ss,
+        _mm_cvtss_f32, _mm_movehl_ps, _mm_shuffle_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // Sign bit mask: clear bit 31 to compute abs
+    let sign_mask = _mm256_set1_ps(f32::from_bits(0x8000_0000));
+
+    let chunks_32 = n / 32;
+    let mut sum0: __m256 = _mm256_setzero_ps();
+    let mut sum1: __m256 = _mm256_setzero_ps();
+    let mut sum2: __m256 = _mm256_setzero_ps();
+    let mut sum3: __m256 = _mm256_setzero_ps();
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+        let d0 = _mm256_andnot_ps(
+            sign_mask,
+            _mm256_sub_ps(
+                _mm256_loadu_ps(a_ptr.add(base)),
+                _mm256_loadu_ps(b_ptr.add(base)),
+            ),
+        );
+        let d1 = _mm256_andnot_ps(
+            sign_mask,
+            _mm256_sub_ps(
+                _mm256_loadu_ps(a_ptr.add(base + 8)),
+                _mm256_loadu_ps(b_ptr.add(base + 8)),
+            ),
+        );
+        let d2 = _mm256_andnot_ps(
+            sign_mask,
+            _mm256_sub_ps(
+                _mm256_loadu_ps(a_ptr.add(base + 16)),
+                _mm256_loadu_ps(b_ptr.add(base + 16)),
+            ),
+        );
+        let d3 = _mm256_andnot_ps(
+            sign_mask,
+            _mm256_sub_ps(
+                _mm256_loadu_ps(a_ptr.add(base + 24)),
+                _mm256_loadu_ps(b_ptr.add(base + 24)),
+            ),
+        );
+
+        sum0 = _mm256_add_ps(sum0, d0);
+        sum1 = _mm256_add_ps(sum1, d1);
+        sum2 = _mm256_add_ps(sum2, d2);
+        sum3 = _mm256_add_ps(sum3, d3);
+    }
+
+    // Combine accumulators
+    let sum_all = _mm256_add_ps(_mm256_add_ps(sum0, sum1), _mm256_add_ps(sum2, sum3));
+
+    // Horizontal reduction
+    let hi = _mm256_extractf128_ps(sum_all, 1);
+    let lo = _mm256_castps256_ps128(sum_all);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    let mut result = _mm_cvtss_f32(sum32);
+
+    // Handle remaining 8-float chunks
+    let remaining_start = chunks_32 * 32;
+    let remaining = n - remaining_start;
+    let chunks_8 = remaining / 8;
+
+    let mut sum: __m256 = _mm256_setzero_ps();
+    for i in 0..chunks_8 {
+        let offset = remaining_start + i * 8;
+        let d = _mm256_andnot_ps(
+            sign_mask,
+            _mm256_sub_ps(
+                _mm256_loadu_ps(a_ptr.add(offset)),
+                _mm256_loadu_ps(b_ptr.add(offset)),
+            ),
+        );
+        sum = _mm256_add_ps(sum, d);
+    }
+
+    let hi = _mm256_extractf128_ps(sum, 1);
+    let lo = _mm256_castps256_ps128(sum);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    result += _mm_cvtss_f32(sum32);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_8 * 8;
+    for i in tail_start..n {
+        result += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
+    }
+
+    result
+}
+
+/// AVX-512 fused cosine similarity: single-pass dot(a,b), norm(a)^2, norm(b)^2.
+///
+/// Accumulates all three products in one pass with 4-way unrolling and masked
+/// tail handling. Uses exact sqrt/div for IEEE-correct normalization.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m512, __mmask16, _mm512_add_ps, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_maskz_loadu_ps,
+        _mm512_reduce_add_ps, _mm512_setzero_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 64 floats per iteration, 3 accumulators each
+    let chunks_64 = n / 64;
+    let mut ab0: __m512 = _mm512_setzero_ps();
+    let mut ab1: __m512 = _mm512_setzero_ps();
+    let mut ab2: __m512 = _mm512_setzero_ps();
+    let mut ab3: __m512 = _mm512_setzero_ps();
+    let mut aa0: __m512 = _mm512_setzero_ps();
+    let mut aa1: __m512 = _mm512_setzero_ps();
+    let mut aa2: __m512 = _mm512_setzero_ps();
+    let mut aa3: __m512 = _mm512_setzero_ps();
+    let mut bb0: __m512 = _mm512_setzero_ps();
+    let mut bb1: __m512 = _mm512_setzero_ps();
+    let mut bb2: __m512 = _mm512_setzero_ps();
+    let mut bb3: __m512 = _mm512_setzero_ps();
+
+    for i in 0..chunks_64 {
+        let base = i * 64;
+        let va0 = _mm512_loadu_ps(a_ptr.add(base));
+        let vb0 = _mm512_loadu_ps(b_ptr.add(base));
+        let va1 = _mm512_loadu_ps(a_ptr.add(base + 16));
+        let vb1 = _mm512_loadu_ps(b_ptr.add(base + 16));
+        let va2 = _mm512_loadu_ps(a_ptr.add(base + 32));
+        let vb2 = _mm512_loadu_ps(b_ptr.add(base + 32));
+        let va3 = _mm512_loadu_ps(a_ptr.add(base + 48));
+        let vb3 = _mm512_loadu_ps(b_ptr.add(base + 48));
+
+        ab0 = _mm512_fmadd_ps(va0, vb0, ab0);
+        ab1 = _mm512_fmadd_ps(va1, vb1, ab1);
+        ab2 = _mm512_fmadd_ps(va2, vb2, ab2);
+        ab3 = _mm512_fmadd_ps(va3, vb3, ab3);
+
+        aa0 = _mm512_fmadd_ps(va0, va0, aa0);
+        aa1 = _mm512_fmadd_ps(va1, va1, aa1);
+        aa2 = _mm512_fmadd_ps(va2, va2, aa2);
+        aa3 = _mm512_fmadd_ps(va3, va3, aa3);
+
+        bb0 = _mm512_fmadd_ps(vb0, vb0, bb0);
+        bb1 = _mm512_fmadd_ps(vb1, vb1, bb1);
+        bb2 = _mm512_fmadd_ps(vb2, vb2, bb2);
+        bb3 = _mm512_fmadd_ps(vb3, vb3, bb3);
+    }
+
+    // Combine accumulators
+    let ab_all = _mm512_add_ps(_mm512_add_ps(ab0, ab1), _mm512_add_ps(ab2, ab3));
+    let aa_all = _mm512_add_ps(_mm512_add_ps(aa0, aa1), _mm512_add_ps(aa2, aa3));
+    let bb_all = _mm512_add_ps(_mm512_add_ps(bb0, bb1), _mm512_add_ps(bb2, bb3));
+
+    let mut ab = _mm512_reduce_add_ps(ab_all);
+    let mut aa = _mm512_reduce_add_ps(aa_all);
+    let mut bb = _mm512_reduce_add_ps(bb_all);
+
+    // Handle remaining elements using masked loads
+    let remaining_start = chunks_64 * 64;
+    let remaining = n - remaining_start;
+
+    if remaining > 0 {
+        let chunks_16 = remaining / 16;
+        let mut ab_rem: __m512 = _mm512_setzero_ps();
+        let mut aa_rem: __m512 = _mm512_setzero_ps();
+        let mut bb_rem: __m512 = _mm512_setzero_ps();
+
+        for i in 0..chunks_16 {
+            let offset = remaining_start + i * 16;
+            let va = _mm512_loadu_ps(a_ptr.add(offset));
+            let vb = _mm512_loadu_ps(b_ptr.add(offset));
+            ab_rem = _mm512_fmadd_ps(va, vb, ab_rem);
+            aa_rem = _mm512_fmadd_ps(va, va, aa_rem);
+            bb_rem = _mm512_fmadd_ps(vb, vb, bb_rem);
+        }
+
+        let tail_count = remaining % 16;
+        if tail_count > 0 {
+            let tail_offset = remaining_start + chunks_16 * 16;
+            let mask: __mmask16 = ((1u32 << tail_count) - 1) as __mmask16;
+            let va = _mm512_maskz_loadu_ps(mask, a_ptr.add(tail_offset));
+            let vb = _mm512_maskz_loadu_ps(mask, b_ptr.add(tail_offset));
+            ab_rem = _mm512_fmadd_ps(va, vb, ab_rem);
+            aa_rem = _mm512_fmadd_ps(va, va, aa_rem);
+            bb_rem = _mm512_fmadd_ps(vb, vb, bb_rem);
+        }
+
+        ab += _mm512_reduce_add_ps(ab_rem);
+        aa += _mm512_reduce_add_ps(aa_rem);
+        bb += _mm512_reduce_add_ps(bb_rem);
+    }
+
+    if aa > crate::NORM_EPSILON && bb > crate::NORM_EPSILON {
+        ab / (aa.sqrt() * bb.sqrt())
+    } else {
+        0.0
+    }
+}
+
+/// AVX2+FMA fused cosine similarity: single-pass dot(a,b), norm(a)^2, norm(b)^2.
+///
+/// Accumulates all three products in one pass with 4-way unrolling.
+/// Uses exact sqrt/div for IEEE-correct normalization.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` and
+/// `is_x86_feature_detected!("fma")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+pub unsafe fn cosine_avx2(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m256, _mm256_add_ps, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
+        _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32, _mm_movehl_ps,
+        _mm_shuffle_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 32 floats per iteration, 3 accumulators each
+    let chunks_32 = n / 32;
+    let mut ab0: __m256 = _mm256_setzero_ps();
+    let mut ab1: __m256 = _mm256_setzero_ps();
+    let mut ab2: __m256 = _mm256_setzero_ps();
+    let mut ab3: __m256 = _mm256_setzero_ps();
+    let mut aa0: __m256 = _mm256_setzero_ps();
+    let mut aa1: __m256 = _mm256_setzero_ps();
+    let mut aa2: __m256 = _mm256_setzero_ps();
+    let mut aa3: __m256 = _mm256_setzero_ps();
+    let mut bb0: __m256 = _mm256_setzero_ps();
+    let mut bb1: __m256 = _mm256_setzero_ps();
+    let mut bb2: __m256 = _mm256_setzero_ps();
+    let mut bb3: __m256 = _mm256_setzero_ps();
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+        let va0 = _mm256_loadu_ps(a_ptr.add(base));
+        let vb0 = _mm256_loadu_ps(b_ptr.add(base));
+        let va1 = _mm256_loadu_ps(a_ptr.add(base + 8));
+        let vb1 = _mm256_loadu_ps(b_ptr.add(base + 8));
+        let va2 = _mm256_loadu_ps(a_ptr.add(base + 16));
+        let vb2 = _mm256_loadu_ps(b_ptr.add(base + 16));
+        let va3 = _mm256_loadu_ps(a_ptr.add(base + 24));
+        let vb3 = _mm256_loadu_ps(b_ptr.add(base + 24));
+
+        ab0 = _mm256_fmadd_ps(va0, vb0, ab0);
+        ab1 = _mm256_fmadd_ps(va1, vb1, ab1);
+        ab2 = _mm256_fmadd_ps(va2, vb2, ab2);
+        ab3 = _mm256_fmadd_ps(va3, vb3, ab3);
+
+        aa0 = _mm256_fmadd_ps(va0, va0, aa0);
+        aa1 = _mm256_fmadd_ps(va1, va1, aa1);
+        aa2 = _mm256_fmadd_ps(va2, va2, aa2);
+        aa3 = _mm256_fmadd_ps(va3, va3, aa3);
+
+        bb0 = _mm256_fmadd_ps(vb0, vb0, bb0);
+        bb1 = _mm256_fmadd_ps(vb1, vb1, bb1);
+        bb2 = _mm256_fmadd_ps(vb2, vb2, bb2);
+        bb3 = _mm256_fmadd_ps(vb3, vb3, bb3);
+    }
+
+    // Horizontal reduction helper
+    #[inline(always)]
+    unsafe fn hsum256(v: __m256) -> f32 {
+        let hi = _mm256_extractf128_ps(v, 1);
+        let lo = _mm256_castps256_ps128(v);
+        let sum128 = _mm_add_ps(lo, hi);
+        let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+        let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+        _mm_cvtss_f32(sum32)
+    }
+
+    // Combine accumulators
+    let ab_all = _mm256_add_ps(_mm256_add_ps(ab0, ab1), _mm256_add_ps(ab2, ab3));
+    let aa_all = _mm256_add_ps(_mm256_add_ps(aa0, aa1), _mm256_add_ps(aa2, aa3));
+    let bb_all = _mm256_add_ps(_mm256_add_ps(bb0, bb1), _mm256_add_ps(bb2, bb3));
+
+    let mut ab = hsum256(ab_all);
+    let mut aa = hsum256(aa_all);
+    let mut bb = hsum256(bb_all);
+
+    // Handle remaining 8-float chunks
+    let remaining_start = chunks_32 * 32;
+    let remaining = n - remaining_start;
+    let chunks_8 = remaining / 8;
+
+    let mut ab_rem: __m256 = _mm256_setzero_ps();
+    let mut aa_rem: __m256 = _mm256_setzero_ps();
+    let mut bb_rem: __m256 = _mm256_setzero_ps();
+
+    for i in 0..chunks_8 {
+        let offset = remaining_start + i * 8;
+        let va = _mm256_loadu_ps(a_ptr.add(offset));
+        let vb = _mm256_loadu_ps(b_ptr.add(offset));
+        ab_rem = _mm256_fmadd_ps(va, vb, ab_rem);
+        aa_rem = _mm256_fmadd_ps(va, va, aa_rem);
+        bb_rem = _mm256_fmadd_ps(vb, vb, bb_rem);
+    }
+
+    ab += hsum256(ab_rem);
+    aa += hsum256(aa_rem);
+    bb += hsum256(bb_rem);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_8 * 8;
+    for i in tail_start..n {
+        let ai = *a.get_unchecked(i);
+        let bi = *b.get_unchecked(i);
+        ab += ai * bi;
+        aa += ai * ai;
+        bb += bi * bi;
+    }
+
+    if aa > crate::NORM_EPSILON && bb > crate::NORM_EPSILON {
+        ab / (aa.sqrt() * bb.sqrt())
+    } else {
+        0.0
+    }
+}
+
 /// AVX-512 masked intersection count for sorted indices.
 ///
 /// Uses `_mm512_mask_cmpeq_epi32_mask` to find matching indices in two blocks.
@@ -634,6 +1085,68 @@ mod tests {
                 expected,
                 actual,
                 rel_error
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_cosine_avx512_correctness() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("AVX-512F not available, skipping test");
+            return;
+        }
+
+        for size in [1, 15, 16, 17, 31, 32, 63, 64, 65, 127, 128, 256, 512, 1024] {
+            let a: Vec<f32> = (0..size).map(|i| ((i * 7) as f32).sin()).collect();
+            let b: Vec<f32> = (0..size).map(|i| ((i * 11) as f32).cos()).collect();
+
+            let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            let aa: f32 = a.iter().map(|x| x * x).sum();
+            let bb: f32 = b.iter().map(|x| x * x).sum();
+            let expected = ab / (aa.sqrt() * bb.sqrt());
+
+            let actual = unsafe { cosine_avx512(&a, &b) };
+
+            let diff = (actual - expected).abs();
+            assert!(
+                diff < 1e-4,
+                "AVX-512 cosine size={}: expected={}, actual={}, diff={}",
+                size,
+                expected,
+                actual,
+                diff
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_cosine_avx2_correctness() {
+        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
+            eprintln!("AVX2+FMA not available, skipping test");
+            return;
+        }
+
+        for size in [1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 128, 256, 512] {
+            let a: Vec<f32> = (0..size).map(|i| ((i * 7) as f32).sin()).collect();
+            let b: Vec<f32> = (0..size).map(|i| ((i * 11) as f32).cos()).collect();
+
+            let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            let aa: f32 = a.iter().map(|x| x * x).sum();
+            let bb: f32 = b.iter().map(|x| x * x).sum();
+            let expected = ab / (aa.sqrt() * bb.sqrt());
+
+            let actual = unsafe { cosine_avx2(&a, &b) };
+
+            let diff = (actual - expected).abs();
+            assert!(
+                diff < 1e-5,
+                "AVX2 cosine size={}: expected={}, actual={}, diff={}",
+                size,
+                expected,
+                actual,
+                diff
             );
         }
     }

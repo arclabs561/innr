@@ -219,7 +219,7 @@ fn demo_timing() {
     // Verify checksums are close (floating-point summation order differs)
     let rel_diff = (batch_checksum - naive_checksum).abs() / naive_checksum.abs().max(1.0);
     println!(
-        "   Checksum relative difference: {:.2e} (expected < 1e-4)",
+        "   Checksum relative difference: {:.2e} (expected < 1e-3)",
         rel_diff
     );
     assert!(

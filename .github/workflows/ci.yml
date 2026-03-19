@@ -138,7 +138,6 @@ jobs:
         run: |
           # Miri can't run SIMD intrinsics, so test scalar paths
           cargo miri test --lib -- --skip simd
-        continue-on-error: true
 
   # Property tests with extended iterations
   property-tests:

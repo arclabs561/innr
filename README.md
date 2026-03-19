@@ -75,7 +75,6 @@ let n = norm(&a);         // 1.0
 | `fast_cosine` | Approximate cosine via `fast_rsqrt` |
 | `fast_rsqrt` | Fast inverse square root (hardware rsqrt + Newton-Raphson) |
 | `fast_rsqrt_precise` | Two-iteration Newton-Raphson variant |
-| `fast_cosine_distance` | `1 - fast_cosine` |
 
 ### Batch operations (PDX-style columnar layout)
 

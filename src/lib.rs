@@ -18,6 +18,7 @@
 //!
 //! | Architecture | Instructions | Detection |
 //! |--------------|--------------|-----------|
+//! | x86_64 | AVX-512F | Runtime |
 //! | x86_64 | AVX2 + FMA | Runtime |
 //! | aarch64 | NEON | Always available |
 //! | Other | Portable | LLVM auto-vectorizes |
@@ -105,9 +106,8 @@ pub use maxsim::{maxsim, maxsim_cosine};
 
 /// Minimum vector dimension for SIMD to be worthwhile.
 ///
-/// Below this threshold, function call overhead outweighs SIMD benefits.
-/// Matches qdrant's MIN_DIM_SIZE_SIMD threshold.
-pub const MIN_DIM_SIMD: usize = 16;
+/// Below this, function call overhead outweighs SIMD benefits.
+pub(crate) const MIN_DIM_SIMD: usize = 16;
 
 /// Threshold for treating a norm as "effectively zero".
 ///
@@ -115,7 +115,7 @@ pub const MIN_DIM_SIMD: usize = 16;
 /// headroom while remaining small enough to only catch degenerate cases.
 ///
 /// Used by [`cosine`] to avoid division by zero.
-pub const NORM_EPSILON: f32 = 1e-9;
+pub(crate) const NORM_EPSILON: f32 = 1e-9;
 
 #[cfg(test)]
 mod tests {

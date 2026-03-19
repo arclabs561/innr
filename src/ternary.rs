@@ -56,15 +56,37 @@
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackedTernary {
     /// Packed data: 32 values per u64
-    pub data: Vec<u64>,
+    data: Vec<u64>,
     /// Original dimension
-    pub dimension: usize,
+    dimension: usize,
 }
 
 impl PackedTernary {
-    /// Create from raw data.
+    /// Create from raw packed data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len() != dimension.div_ceil(32)`.
     pub fn new(data: Vec<u64>, dimension: usize) -> Self {
+        assert_eq!(
+            data.len(),
+            dimension.div_ceil(32),
+            "PackedTernary: data length {} doesn't match dimension {} (expected {} words)",
+            data.len(),
+            dimension,
+            dimension.div_ceil(32)
+        );
         Self { data, dimension }
+    }
+
+    /// Raw packed data (32 values per u64 word, 2 bits each).
+    pub fn data(&self) -> &[u64] {
+        &self.data
+    }
+
+    /// Original vector dimension.
+    pub fn dimension(&self) -> usize {
+        self.dimension
     }
 
     /// Create zero-initialized vector.

@@ -51,12 +51,12 @@ use crate::arch;
 #[must_use]
 #[allow(unsafe_code)]
 pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_values: &[f32]) -> f32 {
-    debug_assert_eq!(
+    assert_eq!(
         a_indices.len(),
         a_values.len(),
         "sparse_dot: a indices/values length mismatch"
     );
-    debug_assert_eq!(
+    assert_eq!(
         b_indices.len(),
         b_values.len(),
         "sparse_dot: b indices/values length mismatch"

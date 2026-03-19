@@ -950,6 +950,27 @@ mod proptests {
         }
 
         // -----------------------------------------------------------------
+        // 12. SIMD dot matches f64 reference within ULP bounds
+        // -----------------------------------------------------------------
+        #[test]
+        fn dot_matches_f64_reference((dim, a, b) in dim_and_two_vecs()) {
+            let f64_ref: f64 = a.iter().zip(&b).map(|(&x, &y)| x as f64 * y as f64).sum();
+            let f32_result = dot(&a, &b);
+
+            // f32 accumulation error is O(n * eps * Σ|a_i * b_i|), not O(n * eps * |Σ a_i*b_i|).
+            // When positive and negative terms cancel, the final sum can be much smaller
+            // than the intermediate partial sums, so we scale by the sum of absolute products.
+            let abs_product_sum: f64 = a.iter().zip(&b).map(|(&x, &y)| (x as f64 * y as f64).abs()).sum();
+            let tol = (dim as f64) * f64::from(f32::EPSILON) * abs_product_sum.max(1.0);
+            let diff = (f64::from(f32_result) - f64_ref).abs();
+
+            prop_assert!(
+                diff <= tol,
+                "f64 reference mismatch: f32={f32_result}, f64_ref={f64_ref}, diff={diff}, tol={tol}, dim={dim}"
+            );
+        }
+
+        // -----------------------------------------------------------------
         // 11. L2 direct formula accuracy for close vectors
         //
         // For vectors that differ only slightly, the direct formula should

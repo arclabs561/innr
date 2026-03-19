@@ -87,6 +87,55 @@ impl QuantizationParams {
         Self::from_range(min, max)
     }
 
+    /// Compute params using quantile-based range (clips outliers).
+    ///
+    /// Instead of using the full min/max range, uses the given quantile
+    /// to exclude outlier values. For example, `quantile=0.99` uses the
+    /// 0.5th and 99.5th percentile values as the range, clamping outliers
+    /// to 0 or 255.
+    ///
+    /// This reduces the impact of outlier dimensions on quantization
+    /// resolution, improving recall at the same u8 bit budget.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `quantile` is not in (0.0, 1.0].
+    #[must_use]
+    pub fn fit_quantile(values: &[f32], quantile: f32) -> Self {
+        assert!(
+            quantile > 0.0 && quantile <= 1.0,
+            "quantile must be in (0.0, 1.0]"
+        );
+
+        if values.is_empty() {
+            return Self {
+                alpha: 1.0,
+                offset: 0.0,
+            };
+        }
+
+        if quantile >= 1.0 {
+            return Self::fit(values);
+        }
+
+        let mut sorted: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+
+        if sorted.is_empty() {
+            return Self {
+                alpha: 1.0,
+                offset: 0.0,
+            };
+        }
+
+        let tail = (1.0 - quantile) / 2.0;
+        let lo_idx = (tail * sorted.len() as f32).floor() as usize;
+        let hi_idx = ((1.0 - tail) * sorted.len() as f32).ceil() as usize;
+        let hi_idx = hi_idx.min(sorted.len() - 1);
+
+        Self::from_range(sorted[lo_idx], sorted[hi_idx])
+    }
+
     /// Compute params from a corpus of vectors (iterator of slices).
     ///
     /// Scans all values across all vectors to find the global range.
@@ -288,6 +337,41 @@ fn mixed_dot_u8_f32_portable(a: &[f32], b: &[u8]) -> f32 {
         .sum()
 }
 
+/// Batch kNN over scalar-quantized vectors.
+///
+/// Computes asymmetric dot products (f32 query x u8 corpus) for all
+/// vectors and returns the top-k by similarity. Uses precomputed
+/// query context for efficiency.
+///
+/// This is the quantized first-pass in a two-stage retrieval pipeline:
+/// 1. `batch_knn_u8` over the full quantized corpus (cheap, 4x less memory)
+/// 2. Re-rank top candidates with exact `batch_knn_dot` on full-precision vectors
+#[must_use]
+pub fn batch_knn_u8(
+    query: &[f32],
+    corpus: &[QuantizedU8],
+    params: &QuantizationParams,
+    k: usize,
+) -> Vec<(usize, f32)> {
+    if corpus.is_empty() || k == 0 {
+        return Vec::new();
+    }
+
+    let ctx = query_context(query);
+    let k = k.min(corpus.len());
+
+    let mut scores: Vec<(usize, f32)> = corpus
+        .iter()
+        .enumerate()
+        .map(|(i, q)| (i, asymmetric_dot_u8_precomputed(query, q, params, &ctx)))
+        .collect();
+
+    // Sort descending by score (highest similarity first)
+    scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+    scores.truncate(k);
+    scores
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,6 +519,57 @@ mod tests {
         let params = QuantizationParams::from_range(0.0, 1.0);
         let q = quantize_u8(&[0.5, 0.5], &params);
         let _ = asymmetric_dot_u8(&[1.0, 2.0, 3.0], &q, &params);
+    }
+
+    #[test]
+    fn test_fit_quantile_clips_outliers() {
+        // 98 values in [-1, 1], plus 2 extreme outliers
+        let mut values: Vec<f32> = (0..98).map(|i| (i as f32 / 49.0) - 1.0).collect();
+        values.push(100.0); // outlier
+        values.push(-100.0); // outlier
+
+        let full = QuantizationParams::fit(&values);
+        let clipped = QuantizationParams::fit_quantile(&values, 0.95);
+
+        // Clipped range should be much tighter
+        assert!(
+            clipped.alpha < full.alpha,
+            "clipped alpha {} should be < full alpha {}",
+            clipped.alpha,
+            full.alpha
+        );
+        assert!(
+            clipped.alpha < 10.0,
+            "clipped alpha should be small, got {}",
+            clipped.alpha
+        );
+    }
+
+    #[test]
+    fn test_batch_knn_u8() {
+        let params = QuantizationParams::from_range(-1.0, 1.0);
+        let corpus: Vec<QuantizedU8> = vec![
+            quantize_u8(&[1.0, 0.0, 0.0], &params),
+            quantize_u8(&[0.0, 1.0, 0.0], &params),
+            quantize_u8(&[-1.0, 0.0, 0.0], &params),
+            quantize_u8(&[0.7, 0.7, 0.0], &params),
+        ];
+        let query = [1.0f32, 0.0, 0.0];
+
+        let results = batch_knn_u8(&query, &corpus, &params, 2);
+
+        assert_eq!(results.len(), 2);
+        // First result should be idx 0 (parallel to query) or idx 3 (close)
+        assert!(results[0].0 == 0 || results[0].0 == 3);
+        // Scores should be descending
+        assert!(results[0].1 >= results[1].1);
+    }
+
+    #[test]
+    fn test_batch_knn_u8_empty() {
+        let params = QuantizationParams::from_range(0.0, 1.0);
+        let results = batch_knn_u8(&[1.0], &[], &params, 5);
+        assert!(results.is_empty());
     }
 }
 

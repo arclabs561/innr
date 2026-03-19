@@ -6,7 +6,7 @@
 
 Vector similarity primitives with SIMD dispatch (AVX-512, AVX2+FMA, NEON). Pure Rust, zero dependencies, MSRV 1.75.
 
-Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN (L2, cosine, dot, filtered) over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
+Computes dot product, cosine similarity, L2/L1 distance, binary/ternary/scalar quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN (L2, cosine, dot, filtered) over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
 
 ## Quickstart
 
@@ -67,6 +67,16 @@ let n = norm(&a);         // 1.0
 | `ternary::ternary_hamming` | Hamming distance on ternary vectors |
 | `ternary::asymmetric_dot` | Float query x ternary doc product |
 | `ternary::sparsity` | Fraction of zero entries |
+
+### Scalar quantization (uint8)
+
+| Type / Function | Description |
+|-----------------|-------------|
+| `scalar::QuantizationParams` | Per-collection scale/offset (from `fit()` or `from_range()`) |
+| `scalar::QuantizedU8` | Packed u8 vector (4x compression over f32) |
+| `scalar::quantize_u8` | Quantize f32 vector to u8 |
+| `scalar::asymmetric_dot_u8` | f32 query x u8 doc dot product (SIMD-accelerated) |
+| `scalar::query_context` | Precompute query sum for batch scoring |
 
 ### Fast approximate math
 

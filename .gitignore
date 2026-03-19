@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+/bench_results/
+flamegraph_*.svg

@@ -44,6 +44,7 @@ use crate::MIN_DIM_SIMD;
 /// assert!((r - 0.5).abs() < 1e-3);  // 1/sqrt(4) = 0.5
 /// ```
 #[inline]
+#[must_use]
 pub fn fast_rsqrt(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
@@ -60,6 +61,7 @@ pub fn fast_rsqrt(x: f32) -> f32 {
 ///
 /// ~46 bits of accuracy (overkill for f32, but matches IEEE sqrt).
 #[inline]
+#[must_use]
 pub fn fast_rsqrt_precise(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;

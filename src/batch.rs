@@ -84,7 +84,7 @@
 /// assert_eq!(batch.get(0, 0), 1.0);  // v0[0]
 /// assert_eq!(batch.get(0, 1), 4.0);  // v1[0]
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VerticalBatch {
     /// Data in dimension-major order: data[d * num_vectors + i]
     data: Vec<f32>,
@@ -342,7 +342,7 @@ pub fn batch_l2_squared_pruning(
 }
 
 /// Result of batch k-nearest neighbor search.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BatchKnnResult {
     /// Indices of the k nearest vectors, sorted by score.
     pub indices: Vec<usize>,

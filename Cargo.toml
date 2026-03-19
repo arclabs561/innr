@@ -24,12 +24,7 @@ include = [
 ]
 
 [features]
-# All operations are always compiled. These features exist for backward
-# compatibility with downstream crates that gate on them.
 default = []
-sparse = []
-maxsim = []
-full = ["sparse", "maxsim"]
 
 [dependencies]
 # No dependencies for core operations - just std

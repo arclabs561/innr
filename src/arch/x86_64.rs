@@ -658,6 +658,8 @@ pub unsafe fn l1_avx2(a: &[f32], b: &[f32]) -> f32 {
     // Scalar tail
     let tail_start = remaining_start + chunks_8 * 8;
     for i in tail_start..n {
+        // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+        // so i is always a valid index into both a and b.
         result += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
     }
 
@@ -894,6 +896,8 @@ pub unsafe fn cosine_avx2(a: &[f32], b: &[f32]) -> f32 {
     // Scalar tail
     let tail_start = remaining_start + chunks_8 * 8;
     for i in tail_start..n {
+        // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+        // so i is always a valid index into both a and b.
         let ai = *a.get_unchecked(i);
         let bi = *b.get_unchecked(i);
         ab += ai * bi;
@@ -1056,6 +1060,8 @@ pub unsafe fn dot_u8_f32_avx2(a: &[f32], b: &[u8]) -> f32 {
     // Scalar tail
     let tail_start = remaining_start + chunks_8 * 8;
     for i in tail_start..n {
+        // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+        // so i is always a valid index into both a and b.
         result += *a.get_unchecked(i) * (*b.get_unchecked(i) as f32);
     }
 

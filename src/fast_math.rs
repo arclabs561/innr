@@ -498,10 +498,12 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if n >= 64 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
             return unsafe { x86_64::fast_cosine_avx512(a, b) };
         }
         if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
         {
+            // SAFETY: AVX2 and FMA verified via runtime detection.
             return unsafe { x86_64::fast_cosine_avx2(a, b) };
         }
     }
@@ -509,6 +511,7 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "aarch64")]
     {
         if n >= MIN_DIM_SIMD {
+            // SAFETY: NEON is always available on aarch64.
             return unsafe { aarch64::fast_cosine_neon(a, b) };
         }
     }

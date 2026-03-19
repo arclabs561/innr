@@ -116,11 +116,13 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     {
         // AVX-512
         if dim >= 64 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
             return unsafe { arch::x86_64::maxsim_avx512(query_tokens, doc_tokens) };
         }
 
         // AVX2
         if dim >= 16 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            // SAFETY: AVX2 and FMA verified via runtime detection.
             return unsafe { arch::x86_64::maxsim_avx2(query_tokens, doc_tokens) };
         }
     }

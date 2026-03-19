@@ -524,6 +524,89 @@ pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<
         .collect()
 }
 
+/// Find k nearest neighbors with a predicate filter.
+///
+/// Computes distances only for vectors where `predicate(index)` returns `true`.
+/// This is "predicate pushdown" for brute-force search: metadata filters
+/// (date ranges, categories, user IDs) are applied before distance computation,
+/// avoiding wasted work on irrelevant vectors.
+///
+/// # When to use
+///
+/// Filtered search outperforms post-filtering when selectivity is low (few
+/// vectors pass the filter). For high selectivity (most vectors pass),
+/// unfiltered [`batch_knn`] with post-filtering is equivalent.
+///
+/// # Returns
+///
+/// Indices and distances refer to positions in the original batch, not
+/// positions among filtered candidates.
+#[must_use]
+pub fn batch_knn_filtered<F>(
+    query: &[f32],
+    batch: &VerticalBatch,
+    k: usize,
+    predicate: F,
+) -> BatchKnnResult
+where
+    F: Fn(usize) -> bool,
+{
+    assert_eq!(query.len(), batch.dimension);
+
+    if batch.num_vectors == 0 || k == 0 {
+        return BatchKnnResult {
+            indices: Vec::new(),
+            distances: Vec::new(),
+        };
+    }
+
+    // Build mask of passing vectors
+    let mask: Vec<bool> = (0..batch.num_vectors).map(&predicate).collect();
+    let num_passing = mask.iter().filter(|&&m| m).count();
+
+    if num_passing == 0 {
+        return BatchKnnResult {
+            indices: Vec::new(),
+            distances: Vec::new(),
+        };
+    }
+
+    let k = k.min(num_passing);
+
+    // Compute distances only for passing vectors
+    let mut distances = vec![f32::MAX; batch.num_vectors];
+
+    for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
+        let dim_slice = batch.dimension_slice(d);
+
+        for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
+            if mask[i] {
+                let diff = q_d - v_d;
+                // Reset on first dimension, accumulate after
+                if d == 0 {
+                    *dist = diff * diff;
+                } else {
+                    *dist += diff * diff;
+                }
+            }
+        }
+    }
+
+    // Find k smallest among passing vectors
+    let mut indexed: Vec<(usize, f32)> = distances
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| mask[*i])
+        .collect();
+    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    indexed.truncate(k);
+
+    BatchKnnResult {
+        indices: indexed.iter().map(|(i, _)| *i).collect(),
+        distances: indexed.iter().map(|(_, d)| *d).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -807,6 +890,79 @@ mod tests {
     // =========================================================================
     // batch_knn edge cases
     // =========================================================================
+
+    // =========================================================================
+    // Filtered kNN tests
+    // =========================================================================
+
+    #[test]
+    fn test_filtered_knn_basic() {
+        let vectors = vec![
+            vec![0.0, 0.0],  // idx 0: passes filter
+            vec![1.0, 0.0],  // idx 1: filtered out
+            vec![0.1, 0.0],  // idx 2: passes filter
+            vec![10.0, 0.0], // idx 3: passes filter but far
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        // Only even indices pass
+        let result = batch_knn_filtered(&query, &batch, 2, |i| i % 2 == 0);
+
+        assert_eq!(result.indices.len(), 2);
+        assert_eq!(result.indices[0], 0); // closest passing
+        assert_eq!(result.indices[1], 2); // second closest passing
+    }
+
+    #[test]
+    fn test_filtered_knn_none_pass() {
+        let vectors = vec![vec![1.0, 0.0], vec![2.0, 0.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let result = batch_knn_filtered(&query, &batch, 2, |_| false);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_filtered_knn_all_pass() {
+        let vectors = vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![2.0, 0.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0, 0.0];
+
+        let filtered = batch_knn_filtered(&query, &batch, 2, |_| true);
+        let unfiltered = batch_knn(&query, &batch, 2);
+
+        assert_eq!(filtered.indices, unfiltered.indices);
+    }
+
+    #[test]
+    fn test_filtered_knn_k_larger_than_passing() {
+        let vectors = vec![vec![1.0], vec![2.0], vec![3.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0];
+
+        // Only idx 0 passes, but k=10
+        let result = batch_knn_filtered(&query, &batch, 10, |i| i == 0);
+        assert_eq!(result.indices.len(), 1);
+        assert_eq!(result.indices[0], 0);
+    }
+
+    #[test]
+    fn test_filtered_knn_preserves_original_indices() {
+        let vectors = vec![
+            vec![100.0], // idx 0: filtered
+            vec![100.0], // idx 1: filtered
+            vec![0.1],   // idx 2: passes
+            vec![100.0], // idx 3: filtered
+            vec![0.2],   // idx 4: passes
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![0.0];
+
+        let result = batch_knn_filtered(&query, &batch, 2, |i| i == 2 || i == 4);
+        assert_eq!(result.indices, vec![2, 4]); // original indices, not 0,1
+    }
 
     #[test]
     fn test_batch_knn_k_zero() {

@@ -102,14 +102,13 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
         a.len(),
         b.len()
     );
-    let n = a.len();
 
     // Compute three dot products in one pass for better cache locality
     let mut ab = 0.0f32;
     let mut aa = 0.0f32;
     let mut bb = 0.0f32;
 
-    for (&ai, &bi) in a[..n].iter().zip(b[..n].iter()) {
+    for (&ai, &bi) in a.iter().zip(b.iter()) {
         ab += ai * bi;
         aa += ai * ai;
         bb += bi * bi;
@@ -122,15 +121,6 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
     } else {
         0.0
     }
-}
-
-/// Fast cosine distance: `1 - cosine_similarity`.
-///
-/// More numerically stable formulation that avoids catastrophic cancellation.
-#[inline]
-#[must_use]
-pub fn fast_cosine_distance(a: &[f32], b: &[f32]) -> f32 {
-    1.0 - fast_cosine(a, b)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

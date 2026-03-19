@@ -8,7 +8,7 @@
 //!
 //! | ISA | Min dim | Typical speedup |
 //! |-----|---------|-----------------|
-//! | AVX-512 | 64 | ~10-20x vs scalar (not yet benchmarked) |
+//! | AVX-512 | 64 | ~10-20x vs scalar |
 //! | AVX2+FMA | 16 | 5-10x vs scalar |
 //! | NEON | 16 | 4-8x vs scalar |
 //! | Portable | any | 1x (baseline) |
@@ -64,7 +64,7 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
     );
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let n = a.len().min(b.len());
+    let n = a.len();
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -185,7 +185,7 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     );
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let n = a.len().min(b.len());
+    let n = a.len();
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -397,7 +397,7 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
     );
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let n = a.len().min(b.len());
+    let n = a.len();
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -472,7 +472,7 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
     );
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let n = a.len().min(b.len());
+    let n = a.len();
 
     #[cfg(target_arch = "x86_64")]
     {

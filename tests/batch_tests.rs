@@ -61,21 +61,6 @@ fn from_flat_matches_from_rows() {
 }
 
 #[test]
-#[allow(unsafe_code)]
-fn get_unchecked_matches_get() {
-    let vectors = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
-    let batch = VerticalBatch::from_rows(&vectors);
-
-    for d in 0..batch.dimension() {
-        for i in 0..batch.num_vectors() {
-            let safe = batch.get(d, i);
-            let unchecked = unsafe { batch.get_unchecked(d, i) };
-            assert_eq!(safe, unchecked, "Mismatch at ({}, {})", d, i);
-        }
-    }
-}
-
-#[test]
 fn dimension_slice_correct() {
     let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
     let batch = VerticalBatch::from_rows(&vectors);

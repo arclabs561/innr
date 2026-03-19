@@ -188,17 +188,6 @@ impl VerticalBatch {
         self.data[dim * self.num_vectors + vec_idx]
     }
 
-    /// Get value at (dimension, vector_index) without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Caller must ensure `dim < self.dimension` and `vec_idx < self.num_vectors`.
-    #[inline]
-    #[allow(unsafe_code)]
-    pub unsafe fn get_unchecked(&self, dim: usize, vec_idx: usize) -> f32 {
-        *self.data.get_unchecked(dim * self.num_vectors + vec_idx)
-    }
-
     /// Get slice for a single dimension across all vectors.
     #[inline]
     pub fn dimension_slice(&self, dim: usize) -> &[f32] {
@@ -641,14 +630,14 @@ pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<
     let dots = batch_dot(query, batch);
     let query_norm: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
 
-    if query_norm < 1e-9 {
+    if query_norm < crate::NORM_EPSILON {
         return vec![0.0; batch.num_vectors];
     }
 
     dots.into_iter()
         .zip(norms.iter())
         .map(|(dot, &norm)| {
-            if norm > 1e-9 {
+            if norm > crate::NORM_EPSILON {
                 dot / (query_norm * norm)
             } else {
                 0.0
@@ -996,25 +985,6 @@ mod tests {
         assert_eq!(batch.dimension_slice(0), &[1.0, 3.0, 5.0]);
         // Dimension 1 across all vectors: [2.0, 4.0, 6.0]
         assert_eq!(batch.dimension_slice(1), &[2.0, 4.0, 6.0]);
-    }
-
-    // =========================================================================
-    // get_unchecked safety-checked test
-    // =========================================================================
-
-    #[test]
-    #[allow(unsafe_code)]
-    fn test_get_unchecked_matches_get() {
-        let vectors = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
-        let batch = VerticalBatch::from_rows(&vectors);
-
-        for d in 0..2 {
-            for v in 0..2 {
-                let safe = batch.get(d, v);
-                let unchecked = unsafe { batch.get_unchecked(d, v) };
-                assert_eq!(safe, unchecked, "mismatch at dim={d}, vec={v}");
-            }
-        }
     }
 
     // =========================================================================

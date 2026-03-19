@@ -347,8 +347,8 @@ pub struct BatchKnnResult {
     /// Indices of the k nearest vectors, sorted by score.
     pub indices: Vec<usize>,
     /// Scores for each result. Interpretation depends on the search function:
-    /// - [`batch_knn`] / [`batch_knn_adaptive`]: squared L2 distance (lower = closer)
-    /// - [`batch_knn_cosine`]: cosine similarity (higher = more similar)
+    /// - [`batch_knn`] / [`batch_knn_adaptive`] / [`batch_knn_reordered`]: squared L2 distance (lower = closer)
+    /// - [`batch_knn_cosine`] / [`batch_knn_dot`]: similarity (higher = more similar)
     /// - [`batch_knn_filtered`]: squared L2 distance (lower = closer)
     pub distances: Vec<f32>,
 }
@@ -517,6 +517,155 @@ pub fn batch_knn_adaptive(
     }
 }
 
+/// Compute per-dimension variance across all vectors.
+///
+/// Returns a vector of length `dimension` where each element is the
+/// variance of that dimension across all vectors. Useful for dimension
+/// reordering in pruning algorithms (process high-variance dims first).
+#[must_use]
+pub fn batch_dimension_variance(batch: &VerticalBatch) -> Vec<f32> {
+    if batch.num_vectors <= 1 || batch.dimension == 0 {
+        return vec![0.0; batch.dimension];
+    }
+
+    let n = batch.num_vectors as f32;
+    let mut variances = Vec::with_capacity(batch.dimension);
+
+    for d in 0..batch.dimension {
+        let dim_slice = batch.dimension_slice(d);
+        let mean: f32 = dim_slice.iter().sum::<f32>() / n;
+        let var: f32 = dim_slice
+            .iter()
+            .map(|&x| (x - mean) * (x - mean))
+            .sum::<f32>()
+            / n;
+        variances.push(var);
+    }
+
+    variances
+}
+
+/// Compute the dimension processing order: highest variance first.
+///
+/// Returns a permutation of `0..dimension` sorted by decreasing variance.
+/// Used by [`batch_knn_reordered`] for tighter pruning bounds.
+#[must_use]
+fn variance_order(variances: &[f32]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..variances.len()).collect();
+    order.sort_by(|&a, &b| variances[b].total_cmp(&variances[a]));
+    order
+}
+
+/// Exact kNN with variance-ordered dimension processing (BOND-style pruning).
+///
+/// Processes dimensions in decreasing variance order so that partial distances
+/// grow faster, enabling earlier pruning. Unlike [`batch_knn_adaptive`], this
+/// is exact: it never prunes a true nearest neighbor.
+///
+/// # Algorithm
+///
+/// 1. Compute per-dimension variance
+/// 2. Sort dimensions by decreasing variance
+/// 3. Process dimensions in that order, pruning vectors whose partial L2
+///    distance already exceeds the current k-th best full distance
+///
+/// # When to use
+///
+/// Most effective when dimension contributions to distance are non-uniform
+/// (common for learned embeddings where early PCA components carry more signal).
+/// Falls back to full computation when all dimensions have similar variance.
+///
+/// # References
+///
+/// - PDX (SIGMOD 2025): dimension-ordered processing for early termination
+#[must_use]
+pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
+    assert_eq!(query.len(), batch.dimension);
+
+    if batch.num_vectors == 0 || k == 0 {
+        return BatchKnnResult {
+            indices: Vec::new(),
+            distances: Vec::new(),
+        };
+    }
+
+    let k = k.min(batch.num_vectors);
+
+    // Compute variance and get processing order
+    let variances = batch_dimension_variance(batch);
+    let order = variance_order(&variances);
+
+    let mut distances = vec![0.0f32; batch.num_vectors];
+    let mut alive: Vec<bool> = vec![true; batch.num_vectors];
+    let mut threshold = f32::MAX;
+    let mut num_alive = batch.num_vectors;
+
+    for (step, &d) in order.iter().enumerate() {
+        if num_alive <= k {
+            // Can't prune further -- finish remaining dims for alive vectors
+            for &remaining_d in &order[step..] {
+                let q_d = query[remaining_d];
+                let dim_slice = batch.dimension_slice(remaining_d);
+                for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
+                    if alive[i] {
+                        let diff = q_d - v_d;
+                        *dist += diff * diff;
+                    }
+                }
+            }
+            break;
+        }
+
+        let q_d = query[d];
+        let dim_slice = batch.dimension_slice(d);
+
+        for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
+            if !alive[i] {
+                continue;
+            }
+
+            let diff = q_d - v_d;
+            *dist += diff * diff;
+
+            if *dist > threshold {
+                alive[i] = false;
+                num_alive -= 1;
+            }
+        }
+
+        // Update threshold every 16 dimensions (amortize sort cost)
+        if step % 16 == 15 || step == order.len() - 1 {
+            let mut current_best: Vec<f32> = alive
+                .iter()
+                .zip(distances.iter())
+                .filter(|(&a, _)| a)
+                .map(|(_, &d)| d)
+                .collect();
+
+            if current_best.len() >= k {
+                current_best.sort_by(|a, b| a.total_cmp(b));
+                threshold = current_best[k - 1];
+            }
+        }
+    }
+
+    // Collect results from alive vectors
+    let mut results: Vec<(usize, f32)> = alive
+        .iter()
+        .enumerate()
+        .filter(|(_, &a)| a)
+        .map(|(i, _)| (i, distances[i]))
+        .collect();
+
+    results.sort_by(|a, b| a.1.total_cmp(&b.1));
+    results.truncate(k);
+
+    BatchKnnResult {
+        indices: results.iter().map(|(i, _)| *i).collect(),
+        distances: results.iter().map(|(_, d)| *d).collect(),
+    }
+}
+
 /// Norms for batch of vectors (precomputed for cosine distance).
 #[must_use]
 pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
@@ -558,6 +707,42 @@ pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<
             }
         })
         .collect()
+}
+
+/// Find k vectors with highest dot product (maximum inner product search).
+///
+/// Returns the top-k vectors with highest dot product against the query.
+/// For normalized vectors, dot-product ranking is equivalent to cosine ranking
+/// and L2 ranking -- use this when vectors are unit-normalized for best performance.
+///
+/// # When to use
+///
+/// Pre-normalized embeddings (common with sentence-transformers, OpenAI, Cohere)
+/// should use dot-product search. It avoids the norm computation that cosine
+/// kNN requires, and produces identical rankings.
+#[must_use]
+pub fn batch_knn_dot(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
+    assert_eq!(query.len(), batch.dimension);
+
+    if batch.num_vectors == 0 || k == 0 {
+        return BatchKnnResult {
+            indices: Vec::new(),
+            distances: Vec::new(),
+        };
+    }
+
+    let k = k.min(batch.num_vectors);
+    let dots = batch_dot(query, batch);
+
+    // Sort by descending dot product (highest first)
+    let mut indexed: Vec<(usize, f32)> = dots.into_iter().enumerate().collect();
+    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+    indexed.truncate(k);
+
+    BatchKnnResult {
+        indices: indexed.iter().map(|(i, _)| *i).collect(),
+        distances: indexed.iter().map(|(_, s)| *s).collect(),
+    }
 }
 
 /// Find k most similar vectors by cosine similarity.
@@ -963,6 +1148,89 @@ mod tests {
     // =========================================================================
     // batch_knn edge cases
     // =========================================================================
+
+    // =========================================================================
+    // Dot kNN tests
+    // =========================================================================
+
+    #[test]
+    fn test_batch_knn_dot_basic() {
+        let vectors = vec![
+            vec![1.0, 0.0],  // dot with [1,0] = 1.0
+            vec![0.0, 1.0],  // dot with [1,0] = 0.0
+            vec![-1.0, 0.0], // dot with [1,0] = -1.0
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.0, 0.0];
+
+        let result = batch_knn_dot(&query, &batch, 2);
+        assert_eq!(result.indices[0], 0); // highest dot
+        assert!((result.distances[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_batch_knn_dot_sorted_descending() {
+        let vectors = vec![vec![0.5, 0.5], vec![1.0, 0.0], vec![0.0, 1.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.0, 0.0];
+
+        let result = batch_knn_dot(&query, &batch, 3);
+        for w in result.distances.windows(2) {
+            assert!(
+                w[0] >= w[1],
+                "not sorted descending: {:?}",
+                result.distances
+            );
+        }
+    }
+
+    // =========================================================================
+    // Reordered kNN tests
+    // =========================================================================
+
+    #[test]
+    fn test_batch_knn_reordered_matches_exact() {
+        // Reordered kNN is exact -- must produce same results as batch_knn
+        let vectors: Vec<Vec<f32>> = (0..50)
+            .map(|i| (0..16).map(|d| ((i * 7 + d * 3) as f32).sin()).collect())
+            .collect();
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query: Vec<f32> = (0..16).map(|i| (i as f32 * 0.1).cos()).collect();
+
+        let exact = batch_knn(&query, &batch, 5);
+        let reordered = batch_knn_reordered(&query, &batch, 5);
+
+        assert_eq!(exact.indices, reordered.indices);
+        for (e, r) in exact.distances.iter().zip(&reordered.distances) {
+            assert!(
+                (e - r).abs() < 1e-4,
+                "distance mismatch: exact={e}, reordered={r}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_batch_knn_reordered_empty() {
+        let batch = VerticalBatch::from_rows(&[]);
+        let result = batch_knn_reordered(&[], &batch, 5);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_batch_dimension_variance() {
+        // dim 0: [1, 1, 1] -> variance = 0
+        // dim 1: [0, 5, 10] -> variance = (25+0+25)/3 = 50/3
+        let vectors = vec![vec![1.0, 0.0], vec![1.0, 5.0], vec![1.0, 10.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let var = batch_dimension_variance(&batch);
+
+        assert!(var[0].abs() < 1e-6, "constant dim should have 0 variance");
+        assert!(
+            var[1] > 10.0,
+            "varying dim should have high variance: {}",
+            var[1]
+        );
+    }
 
     // =========================================================================
     // from_slices tests

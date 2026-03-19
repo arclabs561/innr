@@ -205,6 +205,14 @@ impl VerticalBatch {
         self.dimension
     }
 
+    /// Raw data in dimension-major order.
+    ///
+    /// Layout: `data[d * num_vectors + i]` = vector i, dimension d.
+    /// Useful for serialization or passing to external libraries.
+    pub fn data(&self) -> &[f32] {
+        &self.data
+    }
+
     /// Extract a single vector (allocates).
     pub fn extract_vector(&self, vec_idx: usize) -> Vec<f32> {
         (0..self.dimension).map(|d| self.get(d, vec_idx)).collect()

@@ -120,6 +120,31 @@ pub fn norm(v: &[f32]) -> f32 {
     dot(v, v).sqrt()
 }
 
+/// Normalize a vector to unit length (in-place).
+///
+/// After normalization, `norm(v) == 1.0` (within floating-point precision).
+/// Zero vectors are left unchanged (no division by zero).
+///
+/// # Example
+///
+/// ```rust
+/// use innr::dense::normalize;
+/// use innr::norm;
+///
+/// let mut v = vec![3.0_f32, 4.0];
+/// normalize(&mut v);
+/// assert!((norm(&v) - 1.0).abs() < 1e-6);
+/// ```
+pub fn normalize(v: &mut [f32]) {
+    let n = norm(v);
+    if n > crate::NORM_EPSILON {
+        let inv = 1.0 / n;
+        for x in v.iter_mut() {
+            *x *= inv;
+        }
+    }
+}
+
 /// Cosine similarity between two vectors.
 ///
 /// `cosine(a, b) = dot(a, b) / (norm(a) * norm(b))`

@@ -117,7 +117,7 @@ impl VerticalBatch {
 
         // Transpose: row-major → column-major
         for (i, vec) in vectors.iter().enumerate() {
-            debug_assert_eq!(vec.len(), dimension, "Inconsistent vector dimension");
+            assert_eq!(vec.len(), dimension, "Inconsistent vector dimension");
             for (d, &val) in vec.iter().enumerate() {
                 data[d * num_vectors + i] = val;
             }
@@ -132,7 +132,7 @@ impl VerticalBatch {
 
     /// Create from flat row-major data.
     pub fn from_flat(data: &[f32], num_vectors: usize, dimension: usize) -> Self {
-        debug_assert_eq!(data.len(), num_vectors * dimension);
+        assert_eq!(data.len(), num_vectors * dimension);
 
         let mut vertical = vec![0.0f32; dimension * num_vectors];
 
@@ -204,7 +204,7 @@ impl VerticalBatch {
 /// This processes memory sequentially and auto-vectorizes well.
 #[must_use]
 pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
-    debug_assert_eq!(query.len(), batch.dimension);
+    assert_eq!(query.len(), batch.dimension);
 
     let mut distances = vec![0.0f32; batch.num_vectors];
 
@@ -225,7 +225,7 @@ pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
 /// Compute dot products from query to all vectors in batch.
 #[must_use]
 pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
-    debug_assert_eq!(query.len(), batch.dimension);
+    assert_eq!(query.len(), batch.dimension);
 
     let mut products = vec![0.0f32; batch.num_vectors];
 
@@ -266,7 +266,7 @@ pub fn batch_l2_squared_pruning(
     batch: &VerticalBatch,
     threshold: f32,
 ) -> Vec<(usize, f32)> {
-    debug_assert_eq!(query.len(), batch.dimension);
+    assert_eq!(query.len(), batch.dimension);
 
     let mut distances = vec![0.0f32; batch.num_vectors];
     let mut alive: Vec<bool> = vec![true; batch.num_vectors];
@@ -324,7 +324,7 @@ pub struct BatchKnnResult {
 /// current k-th best.
 #[must_use]
 pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
-    debug_assert_eq!(query.len(), batch.dimension);
+    assert_eq!(query.len(), batch.dimension);
 
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
@@ -349,7 +349,7 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
     }
 }
 
-/// Adaptive batch kNN with early termination.
+/// Adaptive batch kNN with early termination (approximate).
 ///
 /// Uses a two-phase approach:
 /// 1. **Warmup**: Process first `warmup_dims` dimensions fully
@@ -357,6 +357,18 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
 ///
 /// This is more efficient than full pruning when the warmup phase
 /// establishes a good distance bound quickly.
+///
+/// # Approximation
+///
+/// This is a heuristic method. The pruning threshold is derived by
+/// linearly extrapolating partial distances from the warmup dimensions
+/// to estimate the full distance. This assumes roughly uniform distance
+/// contribution per dimension. For embeddings with non-uniform dimension
+/// importance (e.g., MRL/Matryoshka-trained models where early dimensions
+/// carry more information), the extrapolation may underestimate the true
+/// distance for some vectors and prune the actual nearest neighbor.
+///
+/// For guaranteed correctness, use [`batch_knn`] instead.
 #[must_use]
 pub fn batch_knn_adaptive(
     query: &[f32],
@@ -364,7 +376,8 @@ pub fn batch_knn_adaptive(
     k: usize,
     warmup_dims: usize,
 ) -> BatchKnnResult {
-    debug_assert_eq!(query.len(), batch.dimension);
+    assert_eq!(query.len(), batch.dimension);
+    assert!(warmup_dims > 0, "warmup_dims must be > 0");
 
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
@@ -490,7 +503,7 @@ pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
 /// Compute cosine similarities from query to all vectors.
 #[must_use]
 pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<f32> {
-    debug_assert_eq!(norms.len(), batch.num_vectors);
+    assert_eq!(norms.len(), batch.num_vectors);
 
     let dots = batch_dot(query, batch);
     let query_norm: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();

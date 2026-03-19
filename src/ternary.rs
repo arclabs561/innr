@@ -166,8 +166,8 @@ pub fn encode_ternary(values: &[f32], threshold: f32) -> PackedTernary {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
-    debug_assert_eq!(a.dimension, b.dimension);
-    debug_assert_eq!(a.data.len(), b.data.len());
+    assert_eq!(a.dimension, b.dimension);
+    assert_eq!(a.data.len(), b.data.len());
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -257,7 +257,7 @@ unsafe fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
 #[inline]
 #[must_use]
 pub fn asymmetric_dot(query: &[f32], ternary: &PackedTernary) -> f32 {
-    debug_assert_eq!(query.len(), ternary.dimension);
+    assert_eq!(query.len(), ternary.dimension);
 
     let mut sum = 0.0f32;
     for (i, &q) in query.iter().enumerate() {
@@ -280,7 +280,7 @@ pub fn batch_asymmetric_dot(query: &[f32], vectors: &[PackedTernary]) -> Vec<f32
 /// Counts positions where values differ (ignoring zeros).
 #[must_use]
 pub fn ternary_hamming(a: &PackedTernary, b: &PackedTernary) -> u32 {
-    debug_assert_eq!(a.dimension, b.dimension);
+    assert_eq!(a.dimension, b.dimension);
 
     let mut diff_count: u32 = 0;
 

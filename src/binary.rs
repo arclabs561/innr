@@ -122,7 +122,7 @@ pub fn encode_binary(values: &[f32], threshold: f32) -> PackedBinary {
 #[inline]
 #[must_use]
 pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
-    debug_assert_eq!(a.dimension, b.dimension);
+    assert_eq!(a.dimension, b.dimension);
     a.data
         .iter()
         .zip(b.data.iter())
@@ -142,7 +142,7 @@ pub fn binary_hamming(a: &PackedBinary, b: &PackedBinary) -> u32 {
 #[inline]
 #[must_use]
 pub fn binary_dot(a: &PackedBinary, b: &PackedBinary) -> u32 {
-    debug_assert_eq!(a.dimension, b.dimension);
+    assert_eq!(a.dimension, b.dimension);
     a.data
         .iter()
         .zip(b.data.iter())

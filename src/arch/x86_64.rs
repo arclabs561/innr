@@ -262,6 +262,201 @@ pub unsafe fn dot_avx2(a: &[f32], b: &[f32]) -> f32 {
     result
 }
 
+/// AVX-512 squared L2 distance: `Σ(a[i] - b[i])²`.
+///
+/// Single-pass: computes differences directly, avoiding catastrophic
+/// cancellation from the expansion `||a||² + ||b||² - 2<a,b>`.
+/// Uses masked loads to eliminate scalar tail loop.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn l2_squared_avx512(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m512, __mmask16, _mm512_add_ps, _mm512_fmadd_ps, _mm512_loadu_ps, _mm512_maskz_loadu_ps,
+        _mm512_reduce_add_ps, _mm512_setzero_ps, _mm512_sub_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 64 floats per iteration
+    let chunks_64 = n / 64;
+    let mut sum0: __m512 = _mm512_setzero_ps();
+    let mut sum1: __m512 = _mm512_setzero_ps();
+    let mut sum2: __m512 = _mm512_setzero_ps();
+    let mut sum3: __m512 = _mm512_setzero_ps();
+
+    for i in 0..chunks_64 {
+        let base = i * 64;
+        let va0 = _mm512_loadu_ps(a_ptr.add(base));
+        let vb0 = _mm512_loadu_ps(b_ptr.add(base));
+        let d0 = _mm512_sub_ps(va0, vb0);
+        let va1 = _mm512_loadu_ps(a_ptr.add(base + 16));
+        let vb1 = _mm512_loadu_ps(b_ptr.add(base + 16));
+        let d1 = _mm512_sub_ps(va1, vb1);
+        let va2 = _mm512_loadu_ps(a_ptr.add(base + 32));
+        let vb2 = _mm512_loadu_ps(b_ptr.add(base + 32));
+        let d2 = _mm512_sub_ps(va2, vb2);
+        let va3 = _mm512_loadu_ps(a_ptr.add(base + 48));
+        let vb3 = _mm512_loadu_ps(b_ptr.add(base + 48));
+        let d3 = _mm512_sub_ps(va3, vb3);
+
+        sum0 = _mm512_fmadd_ps(d0, d0, sum0);
+        sum1 = _mm512_fmadd_ps(d1, d1, sum1);
+        sum2 = _mm512_fmadd_ps(d2, d2, sum2);
+        sum3 = _mm512_fmadd_ps(d3, d3, sum3);
+    }
+
+    // Combine accumulators
+    let sum01 = _mm512_add_ps(sum0, sum1);
+    let sum23 = _mm512_add_ps(sum2, sum3);
+    let sum_all = _mm512_add_ps(sum01, sum23);
+    let mut result = _mm512_reduce_add_ps(sum_all);
+
+    // Handle remaining elements using masked loads (no scalar tail!)
+    let remaining_start = chunks_64 * 64;
+    let remaining = n - remaining_start;
+
+    if remaining > 0 {
+        // Process full 16-element chunks
+        let chunks_16 = remaining / 16;
+        let mut sum_rem: __m512 = _mm512_setzero_ps();
+
+        for i in 0..chunks_16 {
+            let offset = remaining_start + i * 16;
+            let va = _mm512_loadu_ps(a_ptr.add(offset));
+            let vb = _mm512_loadu_ps(b_ptr.add(offset));
+            let d = _mm512_sub_ps(va, vb);
+            sum_rem = _mm512_fmadd_ps(d, d, sum_rem);
+        }
+
+        // Masked load for final partial chunk (0-15 elements)
+        let tail_count = remaining % 16;
+        if tail_count > 0 {
+            let tail_offset = remaining_start + chunks_16 * 16;
+            // Create mask: bits 0..(tail_count-1) set
+            let mask: __mmask16 = ((1u32 << tail_count) - 1) as __mmask16;
+            let va = _mm512_maskz_loadu_ps(mask, a_ptr.add(tail_offset));
+            let vb = _mm512_maskz_loadu_ps(mask, b_ptr.add(tail_offset));
+            let d = _mm512_sub_ps(va, vb);
+            sum_rem = _mm512_fmadd_ps(d, d, sum_rem);
+        }
+
+        result += _mm512_reduce_add_ps(sum_rem);
+    }
+
+    result
+}
+
+/// AVX2+FMA squared L2 distance: `Σ(a[i] - b[i])²`.
+///
+/// Single-pass: computes differences directly, avoiding catastrophic
+/// cancellation from the expansion `||a||² + ||b||² - 2<a,b>`.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` and
+/// `is_x86_feature_detected!("fma")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+pub unsafe fn l2_squared_avx2(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::x86_64::{
+        __m256, _mm256_add_ps, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
+        _mm256_loadu_ps, _mm256_setzero_ps, _mm256_sub_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32,
+        _mm_movehl_ps, _mm_shuffle_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 32 floats per iteration
+    let chunks_32 = n / 32;
+    let mut sum0: __m256 = _mm256_setzero_ps();
+    let mut sum1: __m256 = _mm256_setzero_ps();
+    let mut sum2: __m256 = _mm256_setzero_ps();
+    let mut sum3: __m256 = _mm256_setzero_ps();
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+        let va0 = _mm256_loadu_ps(a_ptr.add(base));
+        let vb0 = _mm256_loadu_ps(b_ptr.add(base));
+        let d0 = _mm256_sub_ps(va0, vb0);
+        let va1 = _mm256_loadu_ps(a_ptr.add(base + 8));
+        let vb1 = _mm256_loadu_ps(b_ptr.add(base + 8));
+        let d1 = _mm256_sub_ps(va1, vb1);
+        let va2 = _mm256_loadu_ps(a_ptr.add(base + 16));
+        let vb2 = _mm256_loadu_ps(b_ptr.add(base + 16));
+        let d2 = _mm256_sub_ps(va2, vb2);
+        let va3 = _mm256_loadu_ps(a_ptr.add(base + 24));
+        let vb3 = _mm256_loadu_ps(b_ptr.add(base + 24));
+        let d3 = _mm256_sub_ps(va3, vb3);
+
+        sum0 = _mm256_fmadd_ps(d0, d0, sum0);
+        sum1 = _mm256_fmadd_ps(d1, d1, sum1);
+        sum2 = _mm256_fmadd_ps(d2, d2, sum2);
+        sum3 = _mm256_fmadd_ps(d3, d3, sum3);
+    }
+
+    // Combine accumulators
+    let sum01 = _mm256_add_ps(sum0, sum1);
+    let sum23 = _mm256_add_ps(sum2, sum3);
+    let sum_all = _mm256_add_ps(sum01, sum23);
+
+    // Horizontal reduction
+    let hi = _mm256_extractf128_ps(sum_all, 1);
+    let lo = _mm256_castps256_ps128(sum_all);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    let mut result = _mm_cvtss_f32(sum32);
+
+    // Handle remaining 8-float chunks
+    let remaining_start = chunks_32 * 32;
+    let remaining = n - remaining_start;
+    let chunks_8 = remaining / 8;
+
+    let mut sum: __m256 = _mm256_setzero_ps();
+    for i in 0..chunks_8 {
+        let offset = remaining_start + i * 8;
+        let va = _mm256_loadu_ps(a_ptr.add(offset));
+        let vb = _mm256_loadu_ps(b_ptr.add(offset));
+        let d = _mm256_sub_ps(va, vb);
+        sum = _mm256_fmadd_ps(d, d, sum);
+    }
+
+    // Reduce remaining sum
+    let hi = _mm256_extractf128_ps(sum, 1);
+    let lo = _mm256_castps256_ps128(sum);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    result += _mm_cvtss_f32(sum32);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_8 * 8;
+    for i in tail_start..n {
+        // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
+        // so i is always a valid index into both a and b.
+        let d = *a.get_unchecked(i) - *b.get_unchecked(i);
+        result += d * d;
+    }
+
+    result
+}
+
 /// AVX-512 masked intersection count for sorted indices.
 ///
 /// Uses `_mm512_mask_cmpeq_epi32_mask` to find matching indices in two blocks.
@@ -373,6 +568,68 @@ mod tests {
             assert!(
                 rel_error < 1e-5,
                 "AVX2 size={}: expected={}, actual={}, rel_error={}",
+                size,
+                expected,
+                actual,
+                rel_error
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_l2_squared_avx512_correctness() {
+        if !is_x86_feature_detected!("avx512f") {
+            eprintln!("AVX-512F not available, skipping test");
+            return;
+        }
+
+        for size in [1, 15, 16, 17, 31, 32, 63, 64, 65, 127, 128, 256, 512, 1024] {
+            let a: Vec<f32> = (0..size).map(|i| (i as f32) * 0.1).collect();
+            let b: Vec<f32> = (0..size).map(|i| (i as f32) * 0.2).collect();
+
+            let expected: f32 = a.iter().zip(&b).map(|(x, y)| (x - y) * (x - y)).sum();
+            let actual = unsafe { l2_squared_avx512(&a, &b) };
+
+            let rel_error = if expected.abs() > 1e-6 {
+                (actual - expected).abs() / expected.abs()
+            } else {
+                (actual - expected).abs()
+            };
+            assert!(
+                rel_error < 1e-4,
+                "AVX-512 L2 size={}: expected={}, actual={}, rel_error={}",
+                size,
+                expected,
+                actual,
+                rel_error
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_l2_squared_avx2_correctness() {
+        if !is_x86_feature_detected!("avx2") || !is_x86_feature_detected!("fma") {
+            eprintln!("AVX2+FMA not available, skipping test");
+            return;
+        }
+
+        for size in [1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 128, 256, 512] {
+            let a: Vec<f32> = (0..size).map(|i| (i as f32) * 0.1).collect();
+            let b: Vec<f32> = (0..size).map(|i| (i as f32) * 0.2).collect();
+
+            let expected: f32 = a.iter().zip(&b).map(|(x, y)| (x - y) * (x - y)).sum();
+            let actual = unsafe { l2_squared_avx2(&a, &b) };
+
+            let rel_error = if expected.abs() > 1e-6 {
+                (actual - expected).abs() / expected.abs()
+            } else {
+                (actual - expected).abs()
+            };
+            assert!(
+                rel_error < 1e-5,
+                "AVX2 L2 size={}: expected={}, actual={}, rel_error={}",
                 size,
                 expected,
                 actual,

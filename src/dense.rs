@@ -274,37 +274,6 @@ pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
     cosine(&a[..end], &b[..end])
 }
 
-/// Compute mean pooling of multiple vectors.
-///
-/// Result is written into `out`.
-///
-/// # Examples
-///
-/// ```
-/// use innr::dense::pool_mean;
-///
-/// let v1 = [1.0_f32, 2.0, 3.0];
-/// let v2 = [3.0_f32, 2.0, 1.0];
-/// let mut out = [0.0_f32; 3];
-/// pool_mean(&[&v1, &v2], &mut out);
-/// assert_eq!(out, [2.0, 2.0, 2.0]);
-/// ```
-pub fn pool_mean(vectors: &[&[f32]], out: &mut [f32]) {
-    if vectors.is_empty() {
-        return;
-    }
-    let n = vectors.len() as f32;
-    out.fill(0.0);
-    for v in vectors {
-        for (o, &vi) in out.iter_mut().zip(v.iter()) {
-            *o += vi;
-        }
-    }
-    for o in out.iter_mut() {
-        *o /= n;
-    }
-}
-
 /// L2 (Euclidean) distance: `sqrt(Σ(a[i] - b[i])²)`.
 ///
 /// # Example
@@ -350,7 +319,21 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
 /// Squared L2 distance: `Σ(a[i] - b[i])²`.
 ///
 /// More efficient than [`l2_distance`] when only comparing distances
-/// (no need for sqrt).
+/// (no need for sqrt). Computed in a single pass over both vectors,
+/// avoiding catastrophic cancellation that occurs with the expansion
+/// `||a||² + ||b||² - 2<a,b>` for close vectors.
+///
+/// # SIMD Acceleration
+///
+/// Automatically dispatches to (in order of preference):
+/// - AVX-512 on x86_64 (runtime detection, n >= 64)
+/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
+/// - NEON on aarch64 (always available, n >= 16)
+/// - Portable fallback otherwise
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
 ///
 /// # Example
 ///
@@ -363,6 +346,7 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -372,89 +356,40 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    // Expanded: ||a - b||² = ||a||² + ||b||² - 2<a,b>
-    // Uses SIMD-accelerated dot() for all three terms.
-    let aa = dot(a, a);
-    let bb = dot(b, b);
-    let ab = dot(a, b);
-    (aa + bb - 2.0 * ab).max(0.0)
-}
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    let n = a.len().min(b.len());
 
-/// Bilinear product: `phi^T * psi / sqrt(d)`.
-///
-/// Used in Dual Goal Representations for value estimation.
-///
-/// # References
-///
-/// - Borsa et al. (2018). "Universal Successor Features Approximators" (ICLR).
-/// - Barreto et al. (2017). "Successor Features for Transfer in Reinforcement Learning" (NeurIPS).
-///
-/// # Examples
-///
-/// ```
-/// use innr::dense::bilinear;
-///
-/// let phi = vec![1.0_f32, 1.0, 1.0, 1.0];
-/// let psi = vec![2.0_f32, 2.0, 2.0, 2.0];
-/// // dot = 8.0, sqrt(4) = 2.0, result = 4.0
-/// assert!((bilinear(&phi, &psi) - 4.0).abs() < 1e-6);
-/// ```
-#[inline]
-#[must_use]
-pub fn bilinear(phi: &[f32], psi: &[f32]) -> f32 {
-    let d = phi.len();
-    if d == 0 {
-        return 0.0;
-    }
-    dot(phi, psi) / (d as f32).sqrt()
-}
-
-/// Tensor (outer) product of two vectors.
-///
-/// Computes the full tensor product: all pairs `a[i] * b[j]`, returned as a
-/// flat row-major vector of length `a.len() * b.len()`.
-///
-/// Note: this computes the full tensor product, not the antisymmetric exterior
-/// (wedge) product from Clifford/geometric algebra.
-#[inline]
-#[must_use]
-pub fn geometric_outer_product(a: &[f32], b: &[f32]) -> Vec<f32> {
-    let mut res = Vec::with_capacity(a.len() * b.len());
-    for &ai in a {
-        for &bi in b {
-            res.push(ai * bi);
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
+            return unsafe { arch::x86_64::l2_squared_avx512(a, b) };
         }
-    }
-    res
-}
 
-/// Metric Residual (MRN) distance: `sqrt(Σ(s[i] - g[i])² + eps) + quasi(s, g)`.
-///
-/// Where `quasi(s, g) = max(0, Σ max(0, s_asym[i] - g_asym[i]))` or similar asymmetric part.
-/// This implementation assumes `s` and `g` are already split or handles the full vector.
-///
-/// Inspired by quasimetric learning literature.
-///
-/// # References
-///
-/// - Wang & Gupta (2023). "On the Optimal Recovery of Graph Signals" / MRN quasimetric formulation.
-/// - Liu et al. (2023). "Metric Residual Networks for Sample Efficient Goal-Conditioned RL" (ICML).
-#[inline]
-#[must_use]
-pub fn metric_residual(s: &[f32], g: &[f32], eps: f32) -> f32 {
-    let d = s.len();
-    let half = d / 2;
-    let sym_dist = l2_distance(&s[..half], &g[..half]);
-
-    let mut asym_max = 0.0_f32;
-    for i in half..d {
-        let diff = s[i] - g[i];
-        if diff > asym_max {
-            asym_max = diff;
+        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
+        {
+            // SAFETY: AVX2 and FMA verified via runtime detection.
+            return unsafe { arch::x86_64::l2_squared_avx2(a, b) };
         }
     }
 
-    (sym_dist * sym_dist + eps).sqrt() + asym_max
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD {
+            // SAFETY: NEON is always available on aarch64.
+            return unsafe { arch::aarch64::l2_squared_neon(a, b) };
+        }
+    }
+
+    #[allow(unreachable_code)]
+    l2_distance_squared_portable(a, b)
+}
+
+/// Portable (non-SIMD) squared L2 distance.
+#[inline]
+#[must_use]
+pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
 }
 
 #[cfg(test)]
@@ -518,24 +453,6 @@ mod tests {
 
         // Triangle inequality: ac <= ab + bc
         assert!(ac <= ab + bc + 1e-6);
-    }
-
-    #[test]
-    fn test_bilinear() {
-        let a = [1.0, 2.0];
-        let b = [3.0, 4.0];
-        // dot = 11, d = 2, sqrt(2) = 1.414...
-        let res = bilinear(&a, &b);
-        assert!((res - 11.0 / 2.0_f32.sqrt()).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_metric_residual() {
-        let s = [0.0, 0.0, 1.0, 0.0]; // half symmetric, half asymmetric
-        let g = [0.0, 0.0, 0.0, 0.0];
-        // sym_dist = 0, asym_max = 1
-        let res = metric_residual(&s, &g, 1e-6);
-        assert!((res - (1e-6_f32.sqrt() + 1.0)).abs() < 1e-6);
     }
 
     // =========================================================================
@@ -821,6 +738,56 @@ mod proptests {
             prop_assert!(
                 ac <= ab + bc + eps,
                 "triangle inequality violated: d(a,c)={ac} > d(a,b)={ab} + d(b,c)={bc}, dim={dim}"
+            );
+        }
+
+        // -----------------------------------------------------------------
+        // 7. L2 direct formula vs expansion formula consistency
+        //
+        // The direct formula `Σ(a_i - b_i)²` should agree with the
+        // expansion `||a||² + ||b||² - 2<a,b>` for well-separated vectors.
+        // For close vectors the expansion suffers catastrophic cancellation,
+        // so we only check agreement within a loose tolerance scaled by
+        // the magnitude of the norms.
+        // -----------------------------------------------------------------
+        #[test]
+        fn l2_direct_vs_expansion((dim, a, b) in dim_and_two_vecs()) {
+            let direct = l2_distance_squared(&a, &b);
+            let aa: f32 = a.iter().map(|x| x * x).sum();
+            let bb: f32 = b.iter().map(|x| x * x).sum();
+            let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+            let expansion = (aa + bb - 2.0 * ab).max(0.0);
+
+            // Both should be non-negative
+            prop_assert!(direct >= 0.0, "direct L2² should be >= 0, got {direct}");
+
+            // Agree within tolerance proportional to norm magnitudes
+            let scale = (aa + bb).max(1.0);
+            let tol = 1e-3 * scale;
+            prop_assert!(
+                (direct - expansion).abs() <= tol,
+                "direct={direct} vs expansion={expansion}, diff={}, scale={scale}, dim={dim}",
+                (direct - expansion).abs()
+            );
+        }
+
+        // -----------------------------------------------------------------
+        // 8. L2 direct formula accuracy for close vectors
+        //
+        // For vectors that differ only slightly, the direct formula should
+        // produce results close to the portable reference.
+        // -----------------------------------------------------------------
+        #[test]
+        fn l2_close_vectors_accuracy((dim, a) in dim_and_vec()) {
+            // Create b = a + small perturbation
+            let b: Vec<f32> = a.iter().map(|x| x + 1e-4).collect();
+            let direct = l2_distance_squared(&a, &b);
+            let reference = l2_distance_squared_portable(&a, &b);
+
+            let tol = 1e-4 * reference.max(1e-6);
+            prop_assert!(
+                (direct - reference).abs() <= tol,
+                "close vectors: direct={direct} vs reference={reference}, dim={dim}"
             );
         }
     }

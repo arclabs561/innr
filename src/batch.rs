@@ -130,6 +130,39 @@ impl VerticalBatch {
         }
     }
 
+    /// Create from borrowed slices (avoids requiring `Vec<f32>` per vector).
+    ///
+    /// # Panics
+    ///
+    /// Panics if slices have inconsistent dimensions.
+    pub fn from_slices(vectors: &[&[f32]]) -> Self {
+        if vectors.is_empty() {
+            return Self {
+                data: Vec::new(),
+                num_vectors: 0,
+                dimension: 0,
+            };
+        }
+
+        let dimension = vectors[0].len();
+        let num_vectors = vectors.len();
+
+        let mut data = vec![0.0f32; dimension * num_vectors];
+
+        for (i, vec) in vectors.iter().enumerate() {
+            assert_eq!(vec.len(), dimension, "Inconsistent vector dimension");
+            for (d, &val) in vec.iter().enumerate() {
+                data[d * num_vectors + i] = val;
+            }
+        }
+
+        Self {
+            data,
+            num_vectors,
+            dimension,
+        }
+    }
+
     /// Create from flat row-major data.
     pub fn from_flat(data: &[f32], num_vectors: usize, dimension: usize) -> Self {
         assert_eq!(data.len(), num_vectors * dimension);
@@ -311,9 +344,12 @@ pub fn batch_l2_squared_pruning(
 /// Result of batch k-nearest neighbor search.
 #[derive(Clone, Debug)]
 pub struct BatchKnnResult {
-    /// Indices of the k nearest vectors, sorted by distance.
+    /// Indices of the k nearest vectors, sorted by score.
     pub indices: Vec<usize>,
-    /// Squared distances to the k nearest vectors.
+    /// Scores for each result. Interpretation depends on the search function:
+    /// - [`batch_knn`] / [`batch_knn_adaptive`]: squared L2 distance (lower = closer)
+    /// - [`batch_knn_cosine`]: cosine similarity (higher = more similar)
+    /// - [`batch_knn_filtered`]: squared L2 distance (lower = closer)
     pub distances: Vec<f32>,
 }
 
@@ -522,6 +558,43 @@ pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<
             }
         })
         .collect()
+}
+
+/// Find k most similar vectors by cosine similarity.
+///
+/// Returns the top-k vectors with highest cosine similarity to the query.
+/// Precomputes norms once, then scores all vectors.
+///
+/// # When to use
+///
+/// Use this instead of [`batch_knn`] when your vectors are not normalized
+/// and you need cosine-based ranking. For pre-normalized vectors (unit norm),
+/// cosine kNN is equivalent to dot-product kNN, which is equivalent to L2 kNN.
+#[must_use]
+pub fn batch_knn_cosine(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
+    assert_eq!(query.len(), batch.dimension);
+
+    if batch.num_vectors == 0 || k == 0 {
+        return BatchKnnResult {
+            indices: Vec::new(),
+            distances: Vec::new(),
+        };
+    }
+
+    let k = k.min(batch.num_vectors);
+    let norms = batch_norms(batch);
+    let cosines = batch_cosine(query, batch, &norms);
+
+    // Sort by descending similarity (highest first)
+    let mut indexed: Vec<(usize, f32)> = cosines.into_iter().enumerate().collect();
+    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+    indexed.truncate(k);
+
+    BatchKnnResult {
+        indices: indexed.iter().map(|(i, _)| *i).collect(),
+        // Store similarities (not distances) -- higher is better
+        distances: indexed.iter().map(|(_, s)| *s).collect(),
+    }
 }
 
 /// Find k nearest neighbors with a predicate filter.
@@ -890,6 +963,90 @@ mod tests {
     // =========================================================================
     // batch_knn edge cases
     // =========================================================================
+
+    // =========================================================================
+    // from_slices tests
+    // =========================================================================
+
+    #[test]
+    fn test_from_slices_matches_from_rows() {
+        let v0 = [1.0f32, 2.0, 3.0];
+        let v1 = [4.0f32, 5.0, 6.0];
+        let v2 = [7.0f32, 8.0, 9.0];
+
+        let from_rows = VerticalBatch::from_rows(&[v0.to_vec(), v1.to_vec(), v2.to_vec()]);
+        let from_slices = VerticalBatch::from_slices(&[&v0, &v1, &v2]);
+
+        for d in 0..3 {
+            for v in 0..3 {
+                assert_eq!(
+                    from_rows.get(d, v),
+                    from_slices.get(d, v),
+                    "mismatch at dim={d}, vec={v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_slices_empty() {
+        let batch = VerticalBatch::from_slices(&[]);
+        assert_eq!(batch.num_vectors(), 0);
+        assert_eq!(batch.dimension(), 0);
+    }
+
+    // =========================================================================
+    // Cosine kNN tests
+    // =========================================================================
+
+    #[test]
+    fn test_batch_knn_cosine_basic() {
+        // v0 is parallel to query (cosine = 1.0)
+        // v1 is orthogonal (cosine = 0.0)
+        // v2 is antiparallel (cosine = -1.0)
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![-1.0, 0.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.0, 0.0];
+
+        let result = batch_knn_cosine(&query, &batch, 2);
+
+        assert_eq!(result.indices.len(), 2);
+        assert_eq!(result.indices[0], 0); // most similar
+        assert_eq!(result.indices[1], 1); // second most similar
+        assert!((result.distances[0] - 1.0).abs() < 1e-5);
+        assert!(result.distances[1].abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_batch_knn_cosine_empty() {
+        let batch = VerticalBatch::from_rows(&[]);
+        let result = batch_knn_cosine(&[], &batch, 5);
+        assert!(result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_batch_knn_cosine_sorted_descending() {
+        let vectors = vec![
+            vec![0.1, 1.0], // some angle
+            vec![1.0, 0.0], // parallel
+            vec![0.5, 0.5], // 45 degrees
+        ];
+        let batch = VerticalBatch::from_rows(&vectors);
+        let query = vec![1.0, 0.0];
+
+        let result = batch_knn_cosine(&query, &batch, 3);
+
+        // Similarities should be sorted descending
+        for w in result.distances.windows(2) {
+            assert!(
+                w[0] >= w[1],
+                "cosine kNN not sorted descending: {:?}",
+                result.distances
+            );
+        }
+        // Most similar should be v1 (parallel)
+        assert_eq!(result.indices[0], 1);
+    }
 
     // =========================================================================
     // Filtered kNN tests

@@ -2,7 +2,7 @@
 //! Benchmarks for dense vector operations.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use innr::{cosine, dot, l2_distance, norm};
+use innr::{cosine, dot, l1_distance, l2_distance, norm};
 use rand::prelude::*;
 
 fn random_vec(n: usize) -> Vec<f32> {
@@ -73,11 +73,28 @@ fn bench_l2_distance(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_l1_distance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("l1_distance");
+
+    for dim in [128, 384, 768, 1536] {
+        let a = random_vec(dim);
+        let b = random_vec(dim);
+
+        group.throughput(Throughput::Elements(dim as u64));
+        group.bench_with_input(BenchmarkId::new("l1", dim), &dim, |bench, _| {
+            bench.iter(|| l1_distance(black_box(&a), black_box(&b)))
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_dot,
     bench_cosine,
     bench_norm,
-    bench_l2_distance
+    bench_l2_distance,
+    bench_l1_distance
 );
 criterion_main!(benches);

@@ -12,7 +12,7 @@ Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantize
 
 ```toml
 [dependencies]
-innr = "0.1.9"
+innr = "0.2.0"
 ```
 
 ```rust

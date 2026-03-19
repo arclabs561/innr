@@ -124,6 +124,12 @@ pub fn norm(v: &[f32]) -> f32 {
 ///
 /// `cosine(a, b) = dot(a, b) / (norm(a) * norm(b))`
 ///
+/// # Single-Pass Fusion
+///
+/// Computes dot(a,b), ||a||^2, and ||b||^2 in a single pass over memory,
+/// reading each vector only once. This is ~3x faster than the naive
+/// 3-pass approach for memory-bound workloads (typical for dim >= 128).
+///
 /// # Zero Vector Handling
 ///
 /// Returns `0.0` if either vector has effectively-zero norm (< 1e-9).
@@ -134,6 +140,18 @@ pub fn norm(v: &[f32]) -> f32 {
 ///
 /// Result is in `[-1, 1]` for valid input. Floating-point error can push
 /// slightly outside this range; clamp if strict bounds are required.
+///
+/// # SIMD Acceleration
+///
+/// Automatically dispatches to (in order of preference):
+/// - AVX-512 on x86_64 (runtime detection, n >= 64)
+/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
+/// - NEON on aarch64 (always available, n >= 16)
+/// - Portable fallback otherwise
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
 ///
 /// # Example
 ///
@@ -156,12 +174,63 @@ pub fn norm(v: &[f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    let d = dot(a, b);
-    let na = norm(a);
-    let nb = norm(b);
-    if na > NORM_EPSILON && nb > NORM_EPSILON {
-        d / (na * nb)
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::cosine: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    let n = a.len().min(b.len());
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
+            return unsafe { arch::x86_64::cosine_avx512(a, b) };
+        }
+
+        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
+        {
+            // SAFETY: AVX2 and FMA verified via runtime detection.
+            return unsafe { arch::x86_64::cosine_avx2(a, b) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD {
+            // SAFETY: NEON is always available on aarch64.
+            return unsafe { arch::aarch64::cosine_neon(a, b) };
+        }
+    }
+
+    #[allow(unreachable_code)]
+    cosine_portable(a, b)
+}
+
+/// Portable (non-SIMD) cosine similarity.
+///
+/// Single-pass: accumulates dot(a,b), ||a||^2, ||b||^2 simultaneously.
+#[inline]
+#[must_use]
+pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
+    let mut ab = 0.0f32;
+    let mut aa = 0.0f32;
+    let mut bb = 0.0f32;
+
+    for (&ai, &bi) in a.iter().zip(b.iter()) {
+        ab += ai * bi;
+        aa += ai * ai;
+        bb += bi * bi;
+    }
+
+    if aa > NORM_EPSILON && bb > NORM_EPSILON {
+        ab / (aa.sqrt() * bb.sqrt())
     } else {
         0.0
     }
@@ -293,6 +362,18 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 
 /// L1 (Manhattan) distance: `Σ|a[i] - b[i]|`.
 ///
+/// # SIMD Acceleration
+///
+/// Automatically dispatches to (in order of preference):
+/// - AVX-512 on x86_64 (runtime detection, n >= 64)
+/// - AVX2 on x86_64 (runtime detection, n >= 16)
+/// - NEON on aarch64 (always available, n >= 16)
+/// - Portable fallback otherwise
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
+///
 /// # Example
 ///
 /// ```rust
@@ -305,6 +386,7 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -313,6 +395,39 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
         a.len(),
         b.len()
     );
+
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    let n = a.len().min(b.len());
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: AVX-512F verified via runtime detection.
+            return unsafe { arch::x86_64::l1_avx512(a, b) };
+        }
+
+        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") {
+            // SAFETY: AVX2 verified via runtime detection.
+            return unsafe { arch::x86_64::l1_avx2(a, b) };
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD {
+            // SAFETY: NEON is always available on aarch64.
+            return unsafe { arch::aarch64::l1_neon(a, b) };
+        }
+    }
+
+    #[allow(unreachable_code)]
+    l1_distance_portable(a, b)
+}
+
+/// Portable (non-SIMD) L1 distance.
+#[inline]
+#[must_use]
+pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
 }
 
@@ -578,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "innr::dot: slice length mismatch")]
+    #[should_panic(expected = "innr::cosine: slice length mismatch")]
     fn cosine_panics_on_length_mismatch() {
         let _ = cosine(&[1.0, 2.0], &[1.0]);
     }
@@ -772,7 +887,45 @@ mod proptests {
         }
 
         // -----------------------------------------------------------------
-        // 8. L2 direct formula accuracy for close vectors
+        // 8. L1 commutativity: l1(a, b) == l1(b, a)
+        // -----------------------------------------------------------------
+        #[test]
+        fn l1_commutative((dim, a, b) in dim_and_two_vecs()) {
+            let ab = l1_distance(&a, &b);
+            let ba = l1_distance(&b, &a);
+            let tol = 1e-4 * ab.abs().max(ba.abs()).max(1.0);
+            prop_assert!(
+                (ab - ba).abs() <= tol,
+                "L1 commutativity failed: l1(a,b)={ab}, l1(b,a)={ba}, dim={dim}"
+            );
+        }
+
+        // -----------------------------------------------------------------
+        // 9. L1 non-negativity
+        // -----------------------------------------------------------------
+        #[test]
+        fn l1_nonnegative((dim, a, b) in dim_and_two_vecs()) {
+            let d = l1_distance(&a, &b);
+            prop_assert!(
+                d >= 0.0,
+                "L1 must be >= 0, got {d} for dim={dim}"
+            );
+        }
+
+        // -----------------------------------------------------------------
+        // 10. L1 self-distance ~= 0.0
+        // -----------------------------------------------------------------
+        #[test]
+        fn l1_self_distance_zero((dim, v) in dim_and_vec()) {
+            let d = l1_distance(&v, &v);
+            prop_assert!(
+                d.abs() < 1e-5,
+                "l1_distance(v, v) should be ~0, got {d}, dim={dim}"
+            );
+        }
+
+        // -----------------------------------------------------------------
+        // 11. L2 direct formula accuracy for close vectors
         //
         // For vectors that differ only slightly, the direct formula should
         // produce results close to the portable reference.

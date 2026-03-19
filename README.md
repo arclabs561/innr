@@ -12,7 +12,7 @@ Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantize
 
 ```toml
 [dependencies]
-innr = "0.1.7"
+innr = "0.1.9"
 ```
 
 ```rust
@@ -28,7 +28,7 @@ let n = norm(&a);         // 1.0
 
 ## Operations
 
-### Core (always available)
+### Core
 
 | Function | Description |
 |----------|-------------|
@@ -39,10 +39,6 @@ let n = norm(&a);         // 1.0
 | `l2_distance_squared` | Squared Euclidean distance (avoids sqrt) |
 | `l1_distance` | Manhattan distance |
 | `angular_distance` | Angular distance (arccos-based) |
-| `pool_mean` | Mean pooling over a set of vectors |
-| `bilinear` | Scaled dot product (`phi^T * psi / sqrt(d)`) |
-| `geometric_outer_product` | Tensor (outer) product of two vectors |
-| `metric_residual` | MRN distance (symmetric + asymmetric components) |
 
 ### Matryoshka embeddings
 
@@ -95,28 +91,19 @@ let n = norm(&a);         // 1.0
 | `batch::batch_l2_squared_pruning` | Batch L2 with early termination |
 | `batch::BatchKnnResult` | k-NN result (indices + distances) |
 
-### Metric traits
+### Sparse vectors
 
-| Trait | Description |
-|-------|-------------|
-| `SymmetricMetric` | Symmetric distance interface (`d(a,b) = d(b,a)`) |
-| `Quasimetric` | Directed distance interface (`d(a,b) != d(b,a)`) |
+| Function | Description |
+|----------|-------------|
+| `sparse_dot`, `sparse_dot_portable` | Sparse vector dot (sorted-index merge) |
+| `sparse_maxsim` | Sparse MaxSim scoring |
 
-### Clifford algebra
+### ColBERT late interaction
 
-| Type / Function | Description |
-|-----------------|-------------|
-| `clifford::Rotor2D` | 2D rotor (even subalgebra of Cl(2)) |
-| `clifford::wedge_2d` | 2D wedge (outer) product |
-| `clifford::geometric_product_2d` | 2D geometric product (scalar + bivector) |
-
-### Feature-gated
-
-| Function | Feature | Description |
-|----------|---------|-------------|
-| `sparse_dot`, `sparse_dot_portable` | `sparse` | Sparse vector dot (sorted-index merge) |
-| `sparse_maxsim` | `sparse` | Sparse MaxSim scoring |
-| `maxsim`, `maxsim_cosine` | `maxsim` | ColBERT late interaction scoring |
+| Function | Description |
+|----------|-------------|
+| `maxsim` | MaxSim dot-product scoring |
+| `maxsim_cosine` | MaxSim cosine scoring |
 
 ## SIMD Dispatch
 
@@ -128,12 +115,6 @@ let n = norm(&a);         // 1.0
 | Other | Portable | LLVM auto-vec |
 
 Vectors < 16 dimensions use portable code.
-
-## Features
-
-- `sparse` -- sparse vector operations
-- `maxsim` -- ColBERT late interaction scoring
-- `full` -- all features
 
 ## Performance
 
@@ -191,7 +172,7 @@ cargo run --example batch_demo
 cargo run --example binary_demo
 cargo run --example fast_math_demo
 cargo run --example matryoshka_search
-cargo run --example maxsim_colbert --features maxsim
+cargo run --example maxsim_colbert
 cargo run --example ternary_demo
 ```
 

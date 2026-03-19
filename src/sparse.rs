@@ -11,6 +11,9 @@
 //! - Li et al. (2025), "SINDI: An Efficient Index for Approximate MIPS on Sparse Vectors"
 //!   -- validates sparse dot as a key primitive for production RAG systems
 
+#[cfg(target_arch = "x86_64")]
+use crate::arch;
+
 /// Sparse dot product for sorted index arrays.
 ///
 /// Computes the inner product of two sparse vectors represented as
@@ -44,9 +47,6 @@
 /// let result = sparse_dot(&a_idx, &a_val, &b_idx, &b_val);
 /// assert!((result - 3.0).abs() < 1e-6);
 /// ```
-#[cfg(target_arch = "x86_64")]
-use crate::arch;
-
 #[inline]
 #[must_use]
 #[allow(unsafe_code)]

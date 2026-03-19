@@ -20,8 +20,9 @@
 //! ```
 
 use innr::cosine;
+use innr::dense::dot_portable;
+use innr::dot;
 use innr::fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
-use innr::{dot, dot_portable};
 use std::time::Instant;
 
 fn main() {

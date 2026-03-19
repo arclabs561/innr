@@ -102,12 +102,7 @@ fn demo_knn() {
 
     println!("   Corpus: {} vectors, dim={}, k={}\n", n, dim, k);
     println!("   batch_knn results:");
-    for (rank, (&idx, &dist)) in result
-        .indices
-        .iter()
-        .zip(result.distances.iter())
-        .enumerate()
-    {
+    for (rank, (&idx, &dist)) in result.indices.iter().zip(result.scores.iter()).enumerate() {
         println!("     #{}: index={}, dist_sq={:.6}", rank + 1, idx, dist);
     }
 

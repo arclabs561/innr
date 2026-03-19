@@ -443,11 +443,11 @@ mod batch_props {
             let batch = VerticalBatch::from_rows(&vectors);
             let result = batch_knn(&query, &batch, 10);
 
-            for i in 1..result.distances.len() {
+            for i in 1..result.scores.len() {
                 prop_assert!(
-                    result.distances[i] >= result.distances[i - 1] - 1e-6,
+                    result.scores[i] >= result.scores[i - 1] - 1e-6,
                     "kNN not sorted: {} > {} at {}",
-                    result.distances[i - 1], result.distances[i], i
+                    result.scores[i - 1], result.scores[i], i
                 );
             }
         }

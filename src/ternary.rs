@@ -289,14 +289,6 @@ pub fn asymmetric_dot(query: &[f32], ternary: &PackedTernary) -> f32 {
     sum
 }
 
-/// Batch asymmetric dot products.
-///
-/// Computes query against multiple ternary vectors efficiently.
-#[must_use]
-pub fn batch_asymmetric_dot(query: &[f32], vectors: &[PackedTernary]) -> Vec<f32> {
-    vectors.iter().map(|v| asymmetric_dot(query, v)).collect()
-}
-
 /// Hamming distance for ternary vectors.
 ///
 /// Counts positions where values differ (ignoring zeros).
@@ -328,8 +320,11 @@ pub fn ternary_hamming(a: &PackedTernary, b: &PackedTernary) -> u32 {
 /// Sparsity (fraction of zeros) in ternary vector.
 #[must_use]
 pub fn sparsity(v: &PackedTernary) -> f32 {
+    if v.dimension() == 0 {
+        return 0.0;
+    }
     let nnz = v.nnz();
-    1.0 - (nnz as f32 / v.dimension as f32)
+    1.0 - (nnz as f32 / v.dimension() as f32)
 }
 
 #[cfg(test)]
@@ -652,34 +647,6 @@ mod tests {
         // -3*1 + -4*(-1) = -3 + 4 = 1
         let result = asymmetric_dot(&query, &t);
         assert!((result - 1.0).abs() < 1e-6);
-    }
-
-    // =========================================================================
-    // batch_asymmetric_dot
-    // =========================================================================
-
-    #[test]
-    fn test_batch_asymmetric_dot() {
-        let mut t1 = PackedTernary::zeros(2);
-        t1.set(0, 1);
-
-        let mut t2 = PackedTernary::zeros(2);
-        t2.set(1, -1);
-
-        let query = vec![1.0, 2.0];
-        let results = batch_asymmetric_dot(&query, &[t1, t2]);
-
-        // t1: 1*1 + 0*2 = 1
-        assert!((results[0] - 1.0).abs() < 1e-6);
-        // t2: 0*1 + (-1)*2 = -2
-        assert!((results[1] - (-2.0)).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_batch_asymmetric_dot_empty() {
-        let query = vec![1.0, 2.0];
-        let results = batch_asymmetric_dot(&query, &[]);
-        assert!(results.is_empty());
     }
 
     // =========================================================================

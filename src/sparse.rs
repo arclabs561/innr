@@ -127,6 +127,7 @@ pub fn sparse_dot_portable(
 ///
 /// # Returns
 /// Sum of max similarities.
+#[must_use]
 pub fn sparse_maxsim(query_tokens: &[(&[u32], &[f32])], doc_tokens: &[(&[u32], &[f32])]) -> f32 {
     if query_tokens.is_empty() || doc_tokens.is_empty() {
         return 0.0;

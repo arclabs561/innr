@@ -9,8 +9,8 @@
 //! | **Similarity (normalized)** | [`cosine`] | Most embeddings are normalized |
 //! | **Similarity (raw)** | [`dot`] | When you know norms |
 //! | **Distance (L2)** | [`l2_distance`] | For k-NN, clustering |
-//! | **Token-level matching** | `maxsim` | ColBERT-style (feature `maxsim`) |
-//! | **Sparse vectors** | `sparse_dot` | BM25 scores (feature `sparse`) |
+//! | **Token-level matching** | [`maxsim`] | ColBERT-style late interaction |
+//! | **Sparse vectors** | [`sparse_dot`] | BM25 scores, SPLADE |
 //!
 //! # SIMD Dispatch
 //!
@@ -61,7 +61,6 @@
 //! - Mikolov et al. (2013). "Efficient Estimation of Word Representations" (Word2Vec)
 //! - Khattab & Zaharia (2020). "ColBERT: Efficient and Effective Passage Search"
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
@@ -70,14 +69,8 @@ mod arch;
 /// Binary (1-bit) quantization: encode, Hamming distance, dot product, Jaccard.
 pub mod binary;
 
-/// Clifford algebra rotors for steerable embeddings (2D geometric product).
-pub mod clifford;
-
 /// Dense vector primitives: dot, cosine, norm, L2/L1 distance, matryoshka.
 pub mod dense;
-
-/// Metric and quasimetric trait interfaces (dependency-free).
-pub mod metric;
 
 /// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
 pub mod fast_math;
@@ -86,26 +79,19 @@ pub mod fast_math;
 pub mod batch;
 
 /// Sparse vector dot product via sorted-index merge join.
-#[cfg(feature = "sparse")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sparse")))]
 mod sparse;
 
 /// ColBERT MaxSim late interaction scoring for multi-vector retrieval.
-#[cfg(feature = "maxsim")]
-#[cfg_attr(docsrs, doc(cfg(feature = "maxsim")))]
 mod maxsim;
 
 // Re-export core operations
 pub use dense::{
     angular_distance, cosine, dot, dot_portable, l1_distance, l2_distance, l2_distance_squared,
-    matryoshka_cosine, matryoshka_dot, norm, pool_mean,
+    matryoshka_cosine, matryoshka_dot, norm,
 };
 
 // Re-export binary operations
 pub use binary::{binary_dot, binary_hamming, binary_jaccard, encode_binary, PackedBinary};
-
-// Re-export metric trait surfaces (interfaces only).
-pub use metric::{Quasimetric, SymmetricMetric};
 
 // Re-export fast math (rsqrt-based approximations)
 pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
@@ -113,12 +99,8 @@ pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_pr
 /// Ternary quantization (1.58-bit) for ultra-compressed embeddings.
 pub mod ternary;
 
-#[cfg(feature = "sparse")]
-#[cfg_attr(docsrs, doc(cfg(feature = "sparse")))]
 pub use sparse::{sparse_dot, sparse_dot_portable, sparse_maxsim};
 
-#[cfg(feature = "maxsim")]
-#[cfg_attr(docsrs, doc(cfg(feature = "maxsim")))]
 pub use maxsim::{maxsim, maxsim_cosine};
 
 /// Minimum vector dimension for SIMD to be worthwhile.

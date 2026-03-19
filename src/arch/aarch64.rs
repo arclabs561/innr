@@ -393,6 +393,81 @@ pub unsafe fn cosine_neon(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+/// NEON mixed-precision dot product: `sum(a_f32[i] * b_u8[i] as f32)`.
+///
+/// Widens u8 -> u16 -> u32 -> f32, then FMA with query f32 values.
+/// Processes 16 u8 elements per iteration (4 FMA operations).
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn dot_u8_f32_neon(a: &[f32], b: &[u8]) -> f32 {
+    use std::arch::aarch64::{
+        float32x4_t, vaddq_f32, vaddvq_f32, vcvtq_f32_u32, vdupq_n_f32, vfmaq_f32, vget_high_u16,
+        vget_high_u8, vget_low_u16, vget_low_u8, vld1q_f32, vld1q_u8, vmovl_u16, vmovl_u8,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // Process 16 elements per iteration (16 u8 -> 4x4 f32)
+    let chunks_16 = n / 16;
+    let mut sum0: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum1: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum2: float32x4_t = vdupq_n_f32(0.0);
+    let mut sum3: float32x4_t = vdupq_n_f32(0.0);
+
+    for i in 0..chunks_16 {
+        let base = i * 16;
+
+        // Load 16 x u8
+        let vb = vld1q_u8(b_ptr.add(base));
+
+        // Widen: u8x16 -> u16x8 (lo/hi halves)
+        let b_lo_u16 = vmovl_u8(vget_low_u8(vb));
+        let b_hi_u16 = vmovl_u8(vget_high_u8(vb));
+
+        // Widen u16x4 -> u32x4 -> f32x4 (4 groups of 4)
+        let b0_f32 = vcvtq_f32_u32(vmovl_u16(vget_low_u16(b_lo_u16)));
+        let b1_f32 = vcvtq_f32_u32(vmovl_u16(vget_high_u16(b_lo_u16)));
+        let b2_f32 = vcvtq_f32_u32(vmovl_u16(vget_low_u16(b_hi_u16)));
+        let b3_f32 = vcvtq_f32_u32(vmovl_u16(vget_high_u16(b_hi_u16)));
+
+        // Load 16 x f32 query values (4 loads of 4)
+        let a0 = vld1q_f32(a_ptr.add(base));
+        let a1 = vld1q_f32(a_ptr.add(base + 4));
+        let a2 = vld1q_f32(a_ptr.add(base + 8));
+        let a3 = vld1q_f32(a_ptr.add(base + 12));
+
+        // FMA: sum += a * b_f32
+        sum0 = vfmaq_f32(sum0, a0, b0_f32);
+        sum1 = vfmaq_f32(sum1, a1, b1_f32);
+        sum2 = vfmaq_f32(sum2, a2, b2_f32);
+        sum3 = vfmaq_f32(sum3, a3, b3_f32);
+    }
+
+    // Combine accumulators
+    let sum01 = vaddq_f32(sum0, sum1);
+    let sum23 = vaddq_f32(sum2, sum3);
+    let sum_all = vaddq_f32(sum01, sum23);
+    let mut result = vaddvq_f32(sum_all);
+
+    // Scalar tail
+    let tail_start = chunks_16 * 16;
+    for i in tail_start..n {
+        result += *a.get_unchecked(i) * (*b.get_unchecked(i) as f32);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

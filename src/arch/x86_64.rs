@@ -959,6 +959,109 @@ pub unsafe fn sparse_match_indices_avx512(a_idx: &[u32], b_idx: &[u32]) -> Vec<(
     matches
 }
 
+/// AVX2 mixed-precision dot product: `sum(a_f32[i] * b_u8[i] as f32)`.
+///
+/// Uses VPMOVZXBD to widen 8 x u8 to 8 x i32, converts to f32, then FMA.
+/// 4-way unrolled: processes 32 u8 elements per outer iteration.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` and
+/// `is_x86_feature_detected!("fma")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+pub unsafe fn dot_u8_f32_avx2(a: &[f32], b: &[u8]) -> f32 {
+    use std::arch::x86_64::{
+        __m256, _mm256_add_ps, _mm256_castps256_ps128, _mm256_cvtepi32_ps, _mm256_cvtepu8_epi32,
+        _mm256_extractf128_ps, _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps,
+        _mm_add_ss, _mm_cvtss_f32, _mm_loadl_epi64, _mm_movehl_ps, _mm_shuffle_ps,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // 4-way unrolled: process 32 elements per iteration (4 x 8)
+    let chunks_32 = n / 32;
+    let mut sum0: __m256 = _mm256_setzero_ps();
+    let mut sum1: __m256 = _mm256_setzero_ps();
+    let mut sum2: __m256 = _mm256_setzero_ps();
+    let mut sum3: __m256 = _mm256_setzero_ps();
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+
+        // Load 8 bytes, widen to i32, convert to f32
+        let b0 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            b_ptr.add(base) as *const _
+        )));
+        let b1 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            b_ptr.add(base + 8) as *const _
+        )));
+        let b2 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            b_ptr.add(base + 16) as *const _
+        )));
+        let b3 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            b_ptr.add(base + 24) as *const _
+        )));
+
+        let a0 = _mm256_loadu_ps(a_ptr.add(base));
+        let a1 = _mm256_loadu_ps(a_ptr.add(base + 8));
+        let a2 = _mm256_loadu_ps(a_ptr.add(base + 16));
+        let a3 = _mm256_loadu_ps(a_ptr.add(base + 24));
+
+        sum0 = _mm256_fmadd_ps(a0, b0, sum0);
+        sum1 = _mm256_fmadd_ps(a1, b1, sum1);
+        sum2 = _mm256_fmadd_ps(a2, b2, sum2);
+        sum3 = _mm256_fmadd_ps(a3, b3, sum3);
+    }
+
+    // Combine accumulators
+    let sum_all = _mm256_add_ps(_mm256_add_ps(sum0, sum1), _mm256_add_ps(sum2, sum3));
+
+    // Horizontal reduction
+    let hi = _mm256_extractf128_ps(sum_all, 1);
+    let lo = _mm256_castps256_ps128(sum_all);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    let mut result = _mm_cvtss_f32(sum32);
+
+    // Handle remaining 8-element chunks
+    let remaining_start = chunks_32 * 32;
+    let remaining = n - remaining_start;
+    let chunks_8 = remaining / 8;
+
+    let mut sum: __m256 = _mm256_setzero_ps();
+    for i in 0..chunks_8 {
+        let offset = remaining_start + i * 8;
+        let b_f32 = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            b_ptr.add(offset) as *const _
+        )));
+        let a_f32 = _mm256_loadu_ps(a_ptr.add(offset));
+        sum = _mm256_fmadd_ps(a_f32, b_f32, sum);
+    }
+
+    let hi = _mm256_extractf128_ps(sum, 1);
+    let lo = _mm256_castps256_ps128(sum);
+    let sum128 = _mm_add_ps(lo, hi);
+    let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+    let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+    result += _mm_cvtss_f32(sum32);
+
+    // Scalar tail
+    let tail_start = remaining_start + chunks_8 * 8;
+    for i in tail_start..n {
+        result += *a.get_unchecked(i) * (*b.get_unchecked(i) as f32);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

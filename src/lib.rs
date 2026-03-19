@@ -100,6 +100,9 @@ pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_pr
 /// Ternary quantization (1.58-bit) for ultra-compressed embeddings.
 pub mod ternary;
 
+/// Scalar quantization (uint8) for memory-efficient asymmetric similarity.
+pub mod scalar;
+
 pub use sparse::{sparse_dot, sparse_maxsim};
 
 pub use maxsim::{maxsim, maxsim_cosine};

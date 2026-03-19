@@ -63,6 +63,10 @@ harness = false
 name = "ternary"
 harness = false
 
+[[bench]]
+name = "batch"
+harness = false
+
 [lints.rust]
 missing_docs = "warn"
 unsafe_code = "warn"

@@ -6,7 +6,7 @@
 
 Vector similarity primitives with SIMD dispatch (AVX-512, AVX2+FMA, NEON). Pure Rust, zero dependencies, MSRV 1.75.
 
-Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
+Computes dot product, cosine similarity, L2/L1 distance, binary/ternary quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN (L2, cosine, dot, filtered) over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
 
 ## Quickstart
 
@@ -33,11 +33,11 @@ let n = norm(&a);         // 1.0
 | Function | Description |
 |----------|-------------|
 | `dot`, `dot_portable` | Inner product (SIMD / portable) |
-| `cosine` | Cosine similarity |
+| `cosine`, `cosine_portable` | Cosine similarity (single-pass fused SIMD) |
 | `norm` | L2 norm |
 | `l2_distance` | Euclidean distance |
 | `l2_distance_squared` | Squared Euclidean distance (avoids sqrt) |
-| `l1_distance` | Manhattan distance |
+| `l1_distance` | Manhattan distance (SIMD-accelerated) |
 | `angular_distance` | Angular distance (arccos-based) |
 
 ### Matryoshka embeddings
@@ -86,10 +86,14 @@ let n = norm(&a);         // 1.0
 | `batch::batch_l2_squared` | Batch squared L2 distances |
 | `batch::batch_cosine` | Batch cosine similarities |
 | `batch::batch_norms` | Norms for all vectors in the batch |
-| `batch::batch_knn` | Exact k-NN over a batch |
-| `batch::batch_knn_adaptive` | Adaptive early-exit k-NN |
-| `batch::batch_l2_squared_pruning` | Batch L2 with early termination |
-| `batch::BatchKnnResult` | k-NN result (indices + distances) |
+| `batch::batch_knn` | Exact k-NN (L2) over a batch |
+| `batch::batch_knn_cosine` | Top-k by cosine similarity |
+| `batch::batch_knn_dot` | Top-k by dot product (MIPS) |
+| `batch::batch_knn_filtered` | k-NN with predicate pushdown |
+| `batch::batch_knn_reordered` | Exact k-NN with variance-ordered pruning |
+| `batch::batch_knn_adaptive` | Approximate early-exit k-NN |
+| `batch::batch_l2_squared_pruning` | Batch L2 with threshold pruning |
+| `batch::batch_dimension_variance` | Per-dimension variance (for reordering) |
 
 ### Sparse vectors
 

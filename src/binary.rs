@@ -36,15 +36,37 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackedBinary {
     /// Packed data: 64 values per u64
-    pub data: Vec<u64>,
+    data: Vec<u64>,
     /// Original dimension
-    pub dimension: usize,
+    dimension: usize,
 }
 
 impl PackedBinary {
-    /// Create from raw data.
+    /// Create from raw packed data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len() != dimension.div_ceil(64)`.
     pub fn new(data: Vec<u64>, dimension: usize) -> Self {
+        assert_eq!(
+            data.len(),
+            dimension.div_ceil(64),
+            "PackedBinary: data length {} doesn't match dimension {} (expected {} words)",
+            data.len(),
+            dimension,
+            dimension.div_ceil(64)
+        );
         Self { data, dimension }
+    }
+
+    /// Raw packed data (64 bits per u64 word).
+    pub fn data(&self) -> &[u64] {
+        &self.data
+    }
+
+    /// Original vector dimension.
+    pub fn dimension(&self) -> usize {
+        self.dimension
     }
 
     /// Create zero-initialized vector.

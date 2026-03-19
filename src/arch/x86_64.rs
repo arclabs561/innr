@@ -1104,7 +1104,11 @@ mod tests {
             let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
             let aa: f32 = a.iter().map(|x| x * x).sum();
             let bb: f32 = b.iter().map(|x| x * x).sum();
-            let expected = ab / (aa.sqrt() * bb.sqrt());
+            let expected = if aa > 1e-9 && bb > 1e-9 {
+                ab / (aa.sqrt() * bb.sqrt())
+            } else {
+                0.0
+            };
 
             let actual = unsafe { cosine_avx512(&a, &b) };
 
@@ -1135,7 +1139,11 @@ mod tests {
             let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
             let aa: f32 = a.iter().map(|x| x * x).sum();
             let bb: f32 = b.iter().map(|x| x * x).sum();
-            let expected = ab / (aa.sqrt() * bb.sqrt());
+            let expected = if aa > 1e-9 && bb > 1e-9 {
+                ab / (aa.sqrt() * bb.sqrt())
+            } else {
+                0.0
+            };
 
             let actual = unsafe { cosine_avx2(&a, &b) };
 

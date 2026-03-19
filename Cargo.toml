@@ -4,7 +4,7 @@ version = "0.1.9"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 rust-version = "1.75"
-description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim, matryoshka, clifford rotors)"
+description = "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim, matryoshka)"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/arclabs561/innr"
 homepage = "https://github.com/arclabs561/innr"
@@ -24,13 +24,12 @@ include = [
 ]
 
 [features]
+# All operations are always compiled. These features exist for backward
+# compatibility with downstream crates that gate on them.
 default = []
-# ColBERT MaxSim late interaction scoring
-maxsim = []
-# Sparse vector dot product (sorted index merge)
 sparse = []
-# All features
-full = ["maxsim", "sparse"]
+maxsim = []
+full = ["sparse", "maxsim"]
 
 [dependencies]
 # No dependencies for core operations - just std
@@ -43,7 +42,6 @@ rand = "0.9"
 
 [[example]]
 name = "maxsim_colbert"
-required-features = ["maxsim"]
 
 [[bench]]
 name = "dense"
@@ -52,12 +50,10 @@ harness = false
 [[bench]]
 name = "sparse"
 harness = false
-required-features = ["sparse"]
 
 [[bench]]
 name = "maxsim"
 harness = false
-required-features = ["maxsim"]
 
 [[bench]]
 name = "fast_math"
@@ -66,10 +62,6 @@ harness = false
 [[bench]]
 name = "ternary"
 harness = false
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
 missing_docs = "warn"

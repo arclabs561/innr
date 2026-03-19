@@ -1,5 +1,4 @@
 //! Property-based tests for MaxSim late interaction scoring.
-#![cfg(feature = "maxsim")]
 
 use proptest::prelude::*;
 

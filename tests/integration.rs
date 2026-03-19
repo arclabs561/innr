@@ -54,7 +54,6 @@ fn test_realistic_embedding_dimensions() {
 }
 
 /// Test MaxSim behavior with ColBERT-style token embeddings.
-#[cfg(feature = "maxsim")]
 #[test]
 fn test_colbert_style_maxsim() {
     // Simulate ColBERT: query has few tokens, document has many

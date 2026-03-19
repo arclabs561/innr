@@ -26,6 +26,26 @@ let c = cosine(&a, &b);   // 0.707
 let n = norm(&a);         // 1.0
 ```
 
+### Batch search
+
+```rust
+use innr::batch::{VerticalBatch, batch_knn_dot};
+
+// 4 vectors of dimension 3
+let corpus = vec![
+    vec![1.0f32, 0.0, 0.0],
+    vec![0.0, 1.0, 0.0],
+    vec![0.7, 0.7, 0.0],
+    vec![0.0, 0.0, 1.0],
+];
+let batch = VerticalBatch::from_rows(&corpus);
+
+let query = [0.8f32, 0.6, 0.0];
+let result = batch_knn_dot(&query, &batch, 2);
+// result.indices: top-2 nearest by dot product
+// result.scores: corresponding similarity scores
+```
+
 ## Operations
 
 ### Core

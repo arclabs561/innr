@@ -87,8 +87,8 @@ mod maxsim;
 
 // Re-export core operations
 pub use dense::{
-    angular_distance, cosine, cosine_portable, dot, dot_portable, l1_distance, l2_distance,
-    l2_distance_squared, matryoshka_cosine, matryoshka_dot, norm,
+    angular_distance, cosine, dot, l1_distance, l2_distance, l2_distance_squared,
+    matryoshka_cosine, matryoshka_dot, norm,
 };
 
 // Re-export binary operations
@@ -100,7 +100,7 @@ pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_pr
 /// Ternary quantization (1.58-bit) for ultra-compressed embeddings.
 pub mod ternary;
 
-pub use sparse::{sparse_dot, sparse_dot_portable, sparse_maxsim};
+pub use sparse::{sparse_dot, sparse_maxsim};
 
 pub use maxsim::{maxsim, maxsim_cosine};
 

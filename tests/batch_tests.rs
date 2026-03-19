@@ -198,7 +198,7 @@ fn knn_returns_k_results() {
     for k in [1, 5, 10, 50, 100] {
         let result = batch_knn(&query, &batch, k);
         assert_eq!(result.indices.len(), k, "Should return {} results", k);
-        assert_eq!(result.distances.len(), k);
+        assert_eq!(result.scores.len(), k);
     }
 }
 
@@ -210,12 +210,12 @@ fn knn_results_sorted() {
 
     let result = batch_knn(&query, &batch, 20);
 
-    for i in 1..result.distances.len() {
+    for i in 1..result.scores.len() {
         assert!(
-            result.distances[i] >= result.distances[i - 1],
+            result.scores[i] >= result.scores[i - 1],
             "Results not sorted: {} > {} at position {}",
-            result.distances[i - 1],
-            result.distances[i],
+            result.scores[i - 1],
+            result.scores[i],
             i
         );
     }
@@ -236,7 +236,7 @@ fn knn_finds_exact_match() {
     let result = batch_knn(&query, &batch, 1);
 
     assert_eq!(result.indices[0], 2);
-    assert!(result.distances[0] < 1e-6);
+    assert!(result.scores[0] < 1e-6);
 }
 
 #[test]
@@ -344,7 +344,7 @@ fn knn_k_zero() {
     let result = batch_knn(&query, &batch, 0);
 
     assert!(result.indices.is_empty());
-    assert!(result.distances.is_empty());
+    assert!(result.scores.is_empty());
 }
 
 #[test]

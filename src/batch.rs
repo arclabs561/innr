@@ -339,7 +339,7 @@ pub struct BatchKnnResult {
     /// - [`batch_knn`] / [`batch_knn_adaptive`] / [`batch_knn_reordered`]: squared L2 distance (lower = closer)
     /// - [`batch_knn_cosine`] / [`batch_knn_dot`]: similarity (higher = more similar)
     /// - [`batch_knn_filtered`]: squared L2 distance (lower = closer)
-    pub distances: Vec<f32>,
+    pub scores: Vec<f32>,
 }
 
 /// Find k nearest neighbors in a batch using PDX-style processing.
@@ -354,7 +354,7 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -370,7 +370,7 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
 
     BatchKnnResult {
         indices: indexed.iter().map(|(i, _)| *i).collect(),
-        distances: indexed.iter().map(|(_, d)| *d).collect(),
+        scores: indexed.iter().map(|(_, d)| *d).collect(),
     }
 }
 
@@ -407,7 +407,7 @@ pub fn batch_knn_adaptive(
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -502,7 +502,7 @@ pub fn batch_knn_adaptive(
 
     BatchKnnResult {
         indices: results.iter().map(|(i, _)| *i).collect(),
-        distances: results.iter().map(|(_, d)| *d).collect(),
+        scores: results.iter().map(|(_, d)| *d).collect(),
     }
 }
 
@@ -569,7 +569,7 @@ pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> Ba
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -599,7 +599,7 @@ pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> Ba
 
     BatchKnnResult {
         indices: indexed.iter().map(|(i, _)| *i).collect(),
-        distances: indexed.iter().map(|(_, d)| *d).collect(),
+        scores: indexed.iter().map(|(_, d)| *d).collect(),
     }
 }
 
@@ -664,7 +664,7 @@ pub fn batch_knn_dot(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnn
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -678,7 +678,7 @@ pub fn batch_knn_dot(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnn
 
     BatchKnnResult {
         indices: indexed.iter().map(|(i, _)| *i).collect(),
-        distances: indexed.iter().map(|(_, s)| *s).collect(),
+        scores: indexed.iter().map(|(_, s)| *s).collect(),
     }
 }
 
@@ -699,7 +699,7 @@ pub fn batch_knn_cosine(query: &[f32], batch: &VerticalBatch, k: usize) -> Batch
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -714,8 +714,7 @@ pub fn batch_knn_cosine(query: &[f32], batch: &VerticalBatch, k: usize) -> Batch
 
     BatchKnnResult {
         indices: indexed.iter().map(|(i, _)| *i).collect(),
-        // Store similarities (not distances) -- higher is better
-        distances: indexed.iter().map(|(_, s)| *s).collect(),
+        scores: indexed.iter().map(|(_, s)| *s).collect(),
     }
 }
 
@@ -751,7 +750,7 @@ where
     if batch.num_vectors == 0 || k == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
@@ -762,14 +761,18 @@ where
     if num_passing == 0 {
         return BatchKnnResult {
             indices: Vec::new(),
-            distances: Vec::new(),
+            scores: Vec::new(),
         };
     }
 
     let k = k.min(num_passing);
 
-    // Compute distances only for passing vectors
-    let mut distances = vec![f32::MAX; batch.num_vectors];
+    // Compute distances only for passing vectors.
+    // Non-passing vectors stay at f32::MAX so they sort last.
+    let mut distances: Vec<f32> = mask
+        .iter()
+        .map(|&m| if m { 0.0 } else { f32::MAX })
+        .collect();
 
     for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
         let dim_slice = batch.dimension_slice(d);
@@ -777,12 +780,7 @@ where
         for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
             if mask[i] {
                 let diff = q_d - v_d;
-                // Reset on first dimension, accumulate after
-                if d == 0 {
-                    *dist = diff * diff;
-                } else {
-                    *dist += diff * diff;
-                }
+                *dist += diff * diff;
             }
         }
     }
@@ -798,7 +796,7 @@ where
 
     BatchKnnResult {
         indices: indexed.iter().map(|(i, _)| *i).collect(),
-        distances: indexed.iter().map(|(_, d)| *d).collect(),
+        scores: indexed.iter().map(|(_, d)| *d).collect(),
     }
 }
 
@@ -1083,7 +1081,7 @@ mod tests {
 
         let result = batch_knn_dot(&query, &batch, 2);
         assert_eq!(result.indices[0], 0); // highest dot
-        assert!((result.distances[0] - 1.0).abs() < 1e-6);
+        assert!((result.scores[0] - 1.0).abs() < 1e-6);
     }
 
     #[test]
@@ -1093,12 +1091,8 @@ mod tests {
         let query = vec![1.0, 0.0];
 
         let result = batch_knn_dot(&query, &batch, 3);
-        for w in result.distances.windows(2) {
-            assert!(
-                w[0] >= w[1],
-                "not sorted descending: {:?}",
-                result.distances
-            );
+        for w in result.scores.windows(2) {
+            assert!(w[0] >= w[1], "not sorted descending: {:?}", result.scores);
         }
     }
 
@@ -1119,7 +1113,7 @@ mod tests {
         let reordered = batch_knn_reordered(&query, &batch, 5);
 
         assert_eq!(exact.indices, reordered.indices);
-        for (e, r) in exact.distances.iter().zip(&reordered.distances) {
+        for (e, r) in exact.scores.iter().zip(&reordered.scores) {
             assert!(
                 (e - r).abs() < 1e-4,
                 "distance mismatch: exact={e}, reordered={r}"
@@ -1199,8 +1193,8 @@ mod tests {
         assert_eq!(result.indices.len(), 2);
         assert_eq!(result.indices[0], 0); // most similar
         assert_eq!(result.indices[1], 1); // second most similar
-        assert!((result.distances[0] - 1.0).abs() < 1e-5);
-        assert!(result.distances[1].abs() < 1e-5);
+        assert!((result.scores[0] - 1.0).abs() < 1e-5);
+        assert!(result.scores[1].abs() < 1e-5);
     }
 
     #[test]
@@ -1223,11 +1217,11 @@ mod tests {
         let result = batch_knn_cosine(&query, &batch, 3);
 
         // Similarities should be sorted descending
-        for w in result.distances.windows(2) {
+        for w in result.scores.windows(2) {
             assert!(
                 w[0] >= w[1],
                 "cosine kNN not sorted descending: {:?}",
-                result.distances
+                result.scores
             );
         }
         // Most similar should be v1 (parallel)
@@ -1315,7 +1309,7 @@ mod tests {
 
         let result = batch_knn(&query, &batch, 0);
         assert!(result.indices.is_empty());
-        assert!(result.distances.is_empty());
+        assert!(result.scores.is_empty());
     }
 
     #[test]
@@ -1349,8 +1343,8 @@ mod tests {
 
         let result = batch_knn(&query, &batch, 4);
         // Distances should be sorted ascending
-        for w in result.distances.windows(2) {
-            assert!(w[0] <= w[1], "distances not sorted: {:?}", result.distances);
+        for w in result.scores.windows(2) {
+            assert!(w[0] <= w[1], "distances not sorted: {:?}", result.scores);
         }
         // Closest is v3 (origin)
         assert_eq!(result.indices[0], 3);

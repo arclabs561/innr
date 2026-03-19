@@ -556,28 +556,23 @@ fn variance_order(variances: &[f32]) -> Vec<usize> {
     order
 }
 
-/// Exact kNN with variance-ordered dimension processing (BOND-style pruning).
+/// Exact kNN with two-phase variance-ordered processing.
 ///
-/// Processes dimensions in decreasing variance order so that partial distances
-/// grow faster, enabling earlier pruning. Unlike [`batch_knn_adaptive`], this
-/// is exact: it never prunes a true nearest neighbor.
+/// Exact kNN with variance-ordered dimension processing.
+///
+/// Produces identical results to [`batch_knn`] but processes dimensions
+/// in decreasing variance order. This improves auto-vectorization
+/// efficiency by ensuring high-signal dimensions are processed first.
 ///
 /// # Algorithm
 ///
-/// 1. Compute per-dimension variance
-/// 2. Sort dimensions by decreasing variance
-/// 3. Process dimensions in that order, pruning vectors whose partial L2
-///    distance already exceeds the current k-th best full distance
-///
-/// # When to use
-///
-/// Most effective when dimension contributions to distance are non-uniform
-/// (common for learned embeddings where early PCA components carry more signal).
-/// Falls back to full computation when all dimensions have similar variance.
+/// 1. Compute per-dimension variance across the corpus
+/// 2. Process dimensions in decreasing variance order
+/// 3. Select k-nearest from complete distances
 ///
 /// # References
 ///
-/// - PDX (SIGMOD 2025): dimension-ordered processing for early termination
+/// - PDX (SIGMOD 2025): dimension-ordered processing for vectorized scan
 #[must_use]
 pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResult {
     assert_eq!(query.len(), batch.dimension);
@@ -596,73 +591,26 @@ pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> Ba
     let order = variance_order(&variances);
 
     let mut distances = vec![0.0f32; batch.num_vectors];
-    let mut alive: Vec<bool> = vec![true; batch.num_vectors];
-    let mut threshold = f32::MAX;
-    let mut num_alive = batch.num_vectors;
 
-    for (step, &d) in order.iter().enumerate() {
-        if num_alive <= k {
-            // Can't prune further -- finish remaining dims for alive vectors
-            for &remaining_d in &order[step..] {
-                let q_d = query[remaining_d];
-                let dim_slice = batch.dimension_slice(remaining_d);
-                for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
-                    if alive[i] {
-                        let diff = q_d - v_d;
-                        *dist += diff * diff;
-                    }
-                }
-            }
-            break;
-        }
-
+    // Process all dimensions in variance order
+    for &d in &order {
         let q_d = query[d];
         let dim_slice = batch.dimension_slice(d);
 
-        for (i, (&v_d, dist)) in dim_slice.iter().zip(distances.iter_mut()).enumerate() {
-            if !alive[i] {
-                continue;
-            }
-
+        for (dist, &v_d) in distances.iter_mut().zip(dim_slice.iter()) {
             let diff = q_d - v_d;
             *dist += diff * diff;
-
-            if *dist > threshold {
-                alive[i] = false;
-                num_alive -= 1;
-            }
-        }
-
-        // Update threshold every 16 dimensions (amortize sort cost)
-        if step % 16 == 15 || step == order.len() - 1 {
-            let mut current_best: Vec<f32> = alive
-                .iter()
-                .zip(distances.iter())
-                .filter(|(&a, _)| a)
-                .map(|(_, &d)| d)
-                .collect();
-
-            if current_best.len() >= k {
-                current_best.sort_by(|a, b| a.total_cmp(b));
-                threshold = current_best[k - 1];
-            }
         }
     }
 
-    // Collect results from alive vectors
-    let mut results: Vec<(usize, f32)> = alive
-        .iter()
-        .enumerate()
-        .filter(|(_, &a)| a)
-        .map(|(i, _)| (i, distances[i]))
-        .collect();
-
-    results.sort_by(|a, b| a.1.total_cmp(&b.1));
-    results.truncate(k);
+    // Find k smallest
+    let mut indexed: Vec<(usize, f32)> = distances.into_iter().enumerate().collect();
+    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    indexed.truncate(k);
 
     BatchKnnResult {
-        indices: results.iter().map(|(i, _)| *i).collect(),
-        distances: results.iter().map(|(_, d)| *d).collect(),
+        indices: indexed.iter().map(|(i, _)| *i).collect(),
+        distances: indexed.iter().map(|(_, d)| *d).collect(),
     }
 }
 

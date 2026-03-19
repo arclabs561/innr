@@ -3,8 +3,9 @@
 //! Tests the PDX-style columnar layout and batch distance computations.
 
 use innr::batch::{
-    batch_cosine, batch_dot, batch_knn, batch_knn_adaptive, batch_l2_squared,
-    batch_l2_squared_pruning, batch_norms, VerticalBatch,
+    batch_cosine, batch_dot, batch_knn, batch_knn_adaptive, batch_knn_cosine, batch_knn_dot,
+    batch_knn_filtered, batch_knn_reordered, batch_l2_squared, batch_l2_squared_pruning,
+    batch_norms, VerticalBatch,
 };
 
 // =============================================================================
@@ -390,6 +391,73 @@ fn cosine_with_zero_norm() {
 
     assert!((cosines[0] - 1.0).abs() < 1e-6);
     assert!(cosines[1].abs() < 1e-6, "Zero vector should give 0 cosine");
+}
+
+// =============================================================================
+// New batch kNN variant tests
+// =============================================================================
+
+#[test]
+fn reordered_knn_matches_exact_large() {
+    // Larger test: 200 vectors, 64 dims -- reordered must match exact
+    let vectors: Vec<Vec<f32>> = (0..200)
+        .map(|i| (0..64).map(|d| ((i * 7 + d * 3) as f32).sin()).collect())
+        .collect();
+    let batch = VerticalBatch::from_rows(&vectors);
+    let query: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1).cos()).collect();
+
+    let exact = batch_knn(&query, &batch, 10);
+    let reordered = batch_knn_reordered(&query, &batch, 10);
+
+    assert_eq!(exact.indices, reordered.indices);
+}
+
+#[test]
+fn cosine_knn_normalized_matches_dot_knn() {
+    // For unit-normalized vectors, cosine ranking == dot ranking
+    let raw_vectors: Vec<Vec<f32>> = (0..50)
+        .map(|i| (0..8).map(|d| ((i * 7 + d * 3) as f32).sin()).collect())
+        .collect();
+
+    // Normalize
+    let vectors: Vec<Vec<f32>> = raw_vectors
+        .iter()
+        .map(|v| {
+            let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            v.iter().map(|x| x / n).collect()
+        })
+        .collect();
+
+    let batch = VerticalBatch::from_rows(&vectors);
+    let query = {
+        let q: Vec<f32> = (0..8).map(|i| (i as f32 * 0.3).cos()).collect();
+        let n: f32 = q.iter().map(|x| x * x).sum::<f32>().sqrt();
+        q.iter().map(|x| x / n).collect::<Vec<f32>>()
+    };
+
+    let cosine_result = batch_knn_cosine(&query, &batch, 5);
+    let dot_result = batch_knn_dot(&query, &batch, 5);
+
+    assert_eq!(
+        cosine_result.indices, dot_result.indices,
+        "Cosine and dot rankings should match for normalized vectors"
+    );
+}
+
+#[test]
+fn filtered_knn_integration() {
+    let vectors: Vec<Vec<f32>> = (0..100).map(|i| vec![i as f32, 0.0]).collect();
+    let batch = VerticalBatch::from_rows(&vectors);
+    let query = vec![50.0, 0.0];
+
+    // Filter to only even-indexed vectors
+    let result = batch_knn_filtered(&query, &batch, 5, |i| i % 2 == 0);
+
+    assert_eq!(result.indices.len(), 5);
+    assert_eq!(result.indices[0], 50); // exact match, even index
+    for &idx in &result.indices {
+        assert_eq!(idx % 2, 0, "All results should have even indices");
+    }
 }
 
 #[test]

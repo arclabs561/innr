@@ -4,9 +4,7 @@
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
 [![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
-Vector similarity primitives with SIMD dispatch (AVX-512, AVX2+FMA, NEON). Pure Rust, zero dependencies, MSRV 1.75.
-
-Computes dot product, cosine similarity, L2/L1 distance, binary/ternary/scalar quantized distances, ColBERT MaxSim, Matryoshka prefix similarity, and batch k-NN (L2, cosine, dot, filtered) over columnar layouts. Runtime CPU detection picks the widest available ISA -- no build-time flags required.
+Vector similarity primitives.
 
 ## Quickstart
 

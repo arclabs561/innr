@@ -2,7 +2,7 @@
 # https://github.com/repository-settings/app
 
 repository:
-  description: "SIMD-accelerated vector similarity primitives (dot, cosine, norm, maxsim, matryoshka, clifford rotors)"
+  description: "Vector similarity primitives"
   homepage: "https://docs.rs/innr"
   private: false
   has_issues: true

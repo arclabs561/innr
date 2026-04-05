@@ -496,12 +496,6 @@ mod tests {
         let quantized = quantize_u8(&doc, &params);
         let approx_dot = asymmetric_dot_u8(&query, &quantized, &params);
 
-        let rel_error = if exact_dot.abs() > 1e-6 {
-            (exact_dot - approx_dot).abs() / exact_dot.abs()
-        } else {
-            (exact_dot - approx_dot).abs()
-        };
-
         // u8 quantization at dim=128 can produce ~10-20% relative error
         // when the exact dot product is small (near zero). Use absolute
         // error tolerance instead.

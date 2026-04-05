@@ -136,9 +136,10 @@ jobs:
 
       - name: Miri tests (safe subset)
         env:
-          PROPTEST_DISABLE_FAILURE_PERSISTENCE: "1"
+          MIRIFLAGS: "-Zmiri-disable-isolation"
         run: |
           # Miri can't run SIMD intrinsics, so test scalar paths
+          # -Zmiri-disable-isolation allows proptest to access getcwd/filesystem
           cargo miri test --lib -- --skip simd
 
   # Property tests with extended iterations

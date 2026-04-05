@@ -582,20 +582,6 @@ mod proptests {
         #![proptest_config(ProptestConfig::with_cases(300))]
 
         #[test]
-        fn quantize_values_in_range(
-            values in prop::collection::vec(-10.0f32..10.0, 1..200)
-        ) {
-            let params = QuantizationParams::fit(&values);
-            let q = quantize_u8(&values, &params);
-
-            prop_assert_eq!(q.dimension(), values.len());
-            for &byte in q.data() {
-                // All u8 values are inherently in [0, 255]
-                prop_assert!(byte <= 255);
-            }
-        }
-
-        #[test]
         fn asymmetric_dot_approximates_exact(
             dim in 1..200usize
         ) {

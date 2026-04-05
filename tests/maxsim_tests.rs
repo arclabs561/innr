@@ -47,6 +47,11 @@ proptest! {
     }
 
     /// MaxSim is NOT commutative (important invariant).
+    ///
+    /// Uses asymmetric inputs (2 query tokens vs 4 doc tokens) where
+    /// maxsim(q, d) sums over 2 query tokens but maxsim(d, q) sums over 4.
+    /// The sums have different numbers of terms, so they must differ when
+    /// the extra doc tokens contribute non-zero maximums.
     #[test]
     fn maxsim_not_commutative((query, doc) in arb_token_pair(2, 4, 32)) {
         let q: Vec<&[f32]> = query.iter().map(|v| v.as_slice()).collect();
@@ -55,13 +60,15 @@ proptest! {
         let qd = innr::maxsim(&q, &d);
         let dq = innr::maxsim(&d, &q);
 
-        // With different token counts, scores should generally differ
-        // This test documents the important invariant that order matters
-        prop_assert!(
-            qd.is_finite() && dq.is_finite(),
-            "Scores should be finite: qd={}, dq={}",
-            qd, dq
-        );
+        prop_assert!(qd.is_finite() && dq.is_finite(),
+            "Scores should be finite: qd={}, dq={}", qd, dq);
+
+        // maxsim(q, d) sums over 2 query tokens; maxsim(d, q) sums over 4 doc tokens.
+        // The two can only be equal if the 2 extra terms in dq are exactly zero,
+        // which requires two of the doc token vectors to be orthogonal to every query
+        // token. With random f32 values in [-10, 10] this is astronomically unlikely.
+        prop_assert_ne!(qd, dq,
+            "maxsim(q,d)={} should not equal maxsim(d,q)={} for asymmetric inputs", qd, dq);
     }
 
     /// MaxSim single query token equals max dot product.

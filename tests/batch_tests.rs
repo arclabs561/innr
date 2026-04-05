@@ -250,12 +250,13 @@ fn knn_adaptive_matches_basic() {
     let basic = batch_knn(&query, &batch, 10);
     let adaptive = batch_knn_adaptive(&query, &batch, 10, 1);
 
-    // Adaptive should find the same or very similar results
-    // (may differ slightly due to pruning estimation)
-    for idx in &basic.indices[..5] {
+    // Adaptive must find the same top-10 results as basic knn.
+    // batch_knn_adaptive with threshold=1 (very conservative pruning) should not
+    // prune any candidate that could end up in the top-k.
+    for idx in &basic.indices {
         assert!(
             adaptive.indices.contains(idx),
-            "Adaptive missing index {} from basic top-5",
+            "Adaptive missing index {} from basic top-10",
             idx
         );
     }

@@ -868,10 +868,10 @@ mod tests {
     fn test_angular_distance_range() {
         // angular_distance must be in [0, 1] for any pair of vectors.
         let pairs: &[(&[f32], &[f32])] = &[
-            (&[1.0, 0.0], &[0.0, 1.0]),   // orthogonal -> 0.5
-            (&[1.0, 0.0], &[1.0, 0.0]),   // identical  -> 0.0
-            (&[1.0, 0.0], &[-1.0, 0.0]),  // opposite   -> 1.0
-            (&[1.0, 1.0], &[1.0, -1.0]),  // 90 deg     -> 0.5
+            (&[1.0, 0.0], &[0.0, 1.0]),  // orthogonal -> 0.5
+            (&[1.0, 0.0], &[1.0, 0.0]),  // identical  -> 0.0
+            (&[1.0, 0.0], &[-1.0, 0.0]), // opposite   -> 1.0
+            (&[1.0, 1.0], &[1.0, -1.0]), // 90 deg     -> 0.5
         ];
         for (a, b) in pairs {
             let d = angular_distance(a, b);
@@ -887,7 +887,10 @@ mod tests {
         let a = [1.0_f32, 0.0];
         let b = [0.0_f32, 1.0];
         let d = angular_distance(&a, &b);
-        assert!((d - 0.5).abs() < 1e-5, "orthogonal angular_distance: got {d}");
+        assert!(
+            (d - 0.5).abs() < 1e-5,
+            "orthogonal angular_distance: got {d}"
+        );
     }
 
     #[test]
@@ -904,7 +907,10 @@ mod tests {
         let a = [1.0_f32, 0.0];
         let b = [-1.0_f32, 0.0];
         let d = angular_distance(&a, &b);
-        assert!((d - 1.0).abs() < 1e-5, "opposite vectors angular_distance: got {d}");
+        assert!(
+            (d - 1.0).abs() < 1e-5,
+            "opposite vectors angular_distance: got {d}"
+        );
     }
 
     #[test]

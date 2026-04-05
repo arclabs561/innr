@@ -1,0 +1,2 @@
+[default]
+failure_persistence = "noop"

@@ -734,6 +734,192 @@ mod tests {
             "cosine of antiparallel vectors: got {result}, expected -1.0"
         );
     }
+
+    // =========================================================================
+    // normalize tests
+    // =========================================================================
+
+    #[test]
+    fn test_normalize_unit_norm() {
+        let mut v = vec![3.0_f32, 4.0];
+        normalize(&mut v);
+        let n = norm(&v);
+        assert!(
+            (n - 1.0).abs() < 1e-6,
+            "norm(normalize(v)) should be ~1.0, got {n}"
+        );
+    }
+
+    #[test]
+    fn test_normalize_direction_preserved() {
+        let mut v = vec![1.0_f32, 0.0, 0.0];
+        normalize(&mut v);
+        // Already unit length; values should be unchanged.
+        assert!((v[0] - 1.0).abs() < 1e-6);
+        assert!(v[1].abs() < 1e-6);
+        assert!(v[2].abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_normalize_zero_vector_unchanged() {
+        // Zero vector must not be divided (would produce NaN).
+        let mut v = vec![0.0_f32, 0.0, 0.0];
+        normalize(&mut v);
+        // Zero vector left unchanged.
+        assert_eq!(v, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_normalize_various_dims() {
+        for dim in [1, 8, 16, 64, 128] {
+            let mut v: Vec<f32> = (1..=dim).map(|i| i as f32).collect();
+            normalize(&mut v);
+            let n = norm(&v);
+            assert!(
+                (n - 1.0).abs() < 1e-5,
+                "norm after normalize should be ~1.0 for dim={dim}, got {n}"
+            );
+        }
+    }
+
+    // =========================================================================
+    // matryoshka_dot tests
+    // =========================================================================
+
+    #[test]
+    fn test_matryoshka_dot_equals_prefix_dot() {
+        let a = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0];
+        let b = vec![5.0_f32, 4.0, 3.0, 2.0, 1.0];
+
+        for prefix in [1, 2, 3, 4, 5] {
+            let mrd = matryoshka_dot(&a, &b, prefix);
+            let expected = dot(&a[..prefix], &b[..prefix]);
+            assert!(
+                (mrd - expected).abs() < 1e-6,
+                "matryoshka_dot(prefix={prefix}): got {mrd}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_matryoshka_dot_full_prefix_equals_dot() {
+        let a = vec![1.0_f32, 0.0, -1.0];
+        let b = vec![2.0_f32, 3.0, 4.0];
+        let full = matryoshka_dot(&a, &b, a.len());
+        let expected = dot(&a, &b);
+        assert!((full - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_matryoshka_dot_prefix_longer_than_vec_clips() {
+        // prefix_len > vec length: clips to vec length.
+        let a = vec![1.0_f32, 2.0];
+        let b = vec![3.0_f32, 4.0];
+        let result = matryoshka_dot(&a, &b, 100);
+        let expected = dot(&a, &b);
+        assert!((result - expected).abs() < 1e-6);
+    }
+
+    // =========================================================================
+    // matryoshka_cosine tests
+    // =========================================================================
+
+    #[test]
+    fn test_matryoshka_cosine_equals_prefix_cosine() {
+        let a = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let b = vec![4.0_f32, 3.0, 2.0, 1.0];
+
+        for prefix in [1, 2, 3, 4] {
+            let mrc = matryoshka_cosine(&a, &b, prefix);
+            let expected = cosine(&a[..prefix], &b[..prefix]);
+            assert!(
+                (mrc - expected).abs() < 1e-6,
+                "matryoshka_cosine(prefix={prefix}): got {mrc}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_matryoshka_cosine_full_prefix_equals_cosine() {
+        let a = vec![1.0_f32, 0.0];
+        let b = vec![0.0_f32, 1.0];
+        let full = matryoshka_cosine(&a, &b, 2);
+        let expected = cosine(&a, &b);
+        // Orthogonal: both should be ~0.0.
+        assert!((full - expected).abs() < 1e-6);
+        assert!(full.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_matryoshka_cosine_prefix_one() {
+        // prefix=1: cosine of scalars is sign(a[0]*b[0]).
+        let a = vec![3.0_f32, -99.0, -99.0];
+        let b = vec![5.0_f32, 1.0, 1.0];
+        let result = matryoshka_cosine(&a, &b, 1);
+        // cosine([3], [5]) = 1.0 (parallel single-element vectors).
+        assert!((result - 1.0).abs() < 1e-5, "got {result}");
+    }
+
+    // =========================================================================
+    // angular_distance tests
+    // =========================================================================
+
+    #[test]
+    fn test_angular_distance_range() {
+        // angular_distance must be in [0, 1] for any pair of vectors.
+        let pairs: &[(&[f32], &[f32])] = &[
+            (&[1.0, 0.0], &[0.0, 1.0]),   // orthogonal -> 0.5
+            (&[1.0, 0.0], &[1.0, 0.0]),   // identical  -> 0.0
+            (&[1.0, 0.0], &[-1.0, 0.0]),  // opposite   -> 1.0
+            (&[1.0, 1.0], &[1.0, -1.0]),  // 90 deg     -> 0.5
+        ];
+        for (a, b) in pairs {
+            let d = angular_distance(a, b);
+            assert!(
+                (0.0..=1.0).contains(&d),
+                "angular_distance out of [0,1]: {d}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_angular_distance_orthogonal_is_half() {
+        let a = [1.0_f32, 0.0];
+        let b = [0.0_f32, 1.0];
+        let d = angular_distance(&a, &b);
+        assert!((d - 0.5).abs() < 1e-5, "orthogonal angular_distance: got {d}");
+    }
+
+    #[test]
+    fn test_angular_distance_identical_is_zero() {
+        let a = [1.0_f32, 2.0, 3.0];
+        let d = angular_distance(&a, &a);
+        // cosine(a,a) may be slightly above 1.0 due to fp rounding, clamped to 1.0
+        // before acos, so acos(1.0) / pi is at most a small fp epsilon.
+        assert!(d < 1e-3, "identical vectors angular_distance: got {d}");
+    }
+
+    #[test]
+    fn test_angular_distance_opposite_is_one() {
+        let a = [1.0_f32, 0.0];
+        let b = [-1.0_f32, 0.0];
+        let d = angular_distance(&a, &b);
+        assert!((d - 1.0).abs() < 1e-5, "opposite vectors angular_distance: got {d}");
+    }
+
+    #[test]
+    fn test_angular_distance_cosine_relationship() {
+        // angular_distance(a, b) == acos(cosine(a, b)) / pi
+        let a = [1.0_f32, 2.0, 3.0];
+        let b = [4.0_f32, -1.0, 2.0];
+        let c = cosine(&a, &b).clamp(-1.0, 1.0);
+        let expected = c.acos() / std::f32::consts::PI;
+        let result = angular_distance(&a, &b);
+        assert!(
+            (result - expected).abs() < 1e-6,
+            "angular_distance mismatch: got {result}, expected {expected}"
+        );
+    }
 }
 
 #[cfg(test)]

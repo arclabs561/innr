@@ -47,8 +47,36 @@ mod sparse_maxsim_props {
             // Basic sanity check: should not be NaN
             prop_assert!(!score.is_nan());
 
-            // If any query vector matches any doc vector exactly, score should be positive
-            // (assuming non-zero vectors)
+            // Value check: compute the expected score manually using the same
+            // merge-join logic (sparse dot for each query-doc pair, then max per query,
+            // then sum). This verifies sparse_maxsim against an independent reference.
+            let expected: f32 = query_slices.iter().map(|(q_idx, q_val)| {
+                doc_slices.iter().map(|(d_idx, d_val)| {
+                    // Merge-join dot product
+                    let mut dot = 0.0f32;
+                    let mut i = 0;
+                    let mut j = 0;
+                    while i < q_idx.len() && j < d_idx.len() {
+                        match q_idx[i].cmp(&d_idx[j]) {
+                            std::cmp::Ordering::Less => i += 1,
+                            std::cmp::Ordering::Greater => j += 1,
+                            std::cmp::Ordering::Equal => {
+                                dot += q_val[i] * d_val[j];
+                                i += 1;
+                                j += 1;
+                            }
+                        }
+                    }
+                    dot
+                })
+                .fold(f32::NEG_INFINITY, f32::max)
+            })
+            .sum();
+
+            prop_assert!(
+                (score - expected).abs() < 1e-4 * expected.abs().max(1.0),
+                "sparse_maxsim={} vs reference={}", score, expected
+            );
         }
 
         /// sparse_dot should match dense dot on equivalent representations.

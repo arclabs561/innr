@@ -3,8 +3,6 @@
 //! These tests ensure that the SIMD primitives produce consistent results
 //! when used by different downstream crates.
 
-use std::time::Instant;
-
 /// Test that basic operations work correctly on realistic embeddings.
 #[test]
 fn test_realistic_embedding_dimensions() {
@@ -94,33 +92,8 @@ fn test_colbert_style_maxsim() {
     );
 }
 
-/// Test that SIMD operations have reasonable performance.
-#[test]
-fn test_performance_sanity() {
-    let dim = 768;
-    let iterations = 10_000;
-
-    let a: Vec<f32> = (0..dim).map(|i| i as f32 * 0.001).collect();
-    let b: Vec<f32> = (0..dim).map(|i| (dim - i) as f32 * 0.001).collect();
-
-    let start = Instant::now();
-    let mut sum = 0.0f32;
-    for _ in 0..iterations {
-        sum += innr::dot(&a, &b);
-    }
-    let elapsed = start.elapsed();
-
-    // Sanity check: 10k dot products of 768-dim vectors should be fast
-    // Even on slow hardware, this should complete in < 1 second
-    assert!(
-        elapsed.as_millis() < 1000,
-        "10k dot products took too long: {:?}",
-        elapsed
-    );
-
-    // Prevent optimization
-    assert!(sum.is_finite());
-}
+// Performance testing belongs in benches/, not in unit tests.
+// See benches/ for criterion-based throughput measurements of dot, cosine, and maxsim.
 
 /// Test edge cases that might cause issues in production.
 #[test]
@@ -138,11 +111,16 @@ fn test_edge_cases() {
     let result = innr::dot(&tiny, &tiny);
     assert!(result.is_finite());
 
-    // Very large values
+    // Very large values: 128 * (1e18)^2 = 1.28e38, which is within f32::MAX (~3.4e38)
+    // but accumulated across 128 elements using SIMD partial sums may overflow to INFINITY.
+    // Either outcome is acceptable; the important thing is no panic and no NaN.
     let large: Vec<f32> = vec![1e18; 128];
     let result = innr::dot(&large, &large);
-    // May overflow, but should not panic
-    let _ = result;
+    assert!(
+        result.is_finite() || result == f32::INFINITY,
+        "dot of large values should be finite or +infinity, got {}",
+        result
+    );
 
     // Mixed positive/negative
     let mixed: Vec<f32> = (0..128)

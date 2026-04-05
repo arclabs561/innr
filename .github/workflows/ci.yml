@@ -135,6 +135,8 @@ jobs:
         run: cargo miri setup
 
       - name: Miri tests (safe subset)
+        env:
+          PROPTEST_DISABLE_FAILURE_PERSISTENCE: "1"
         run: |
           # Miri can't run SIMD intrinsics, so test scalar paths
           cargo miri test --lib -- --skip simd

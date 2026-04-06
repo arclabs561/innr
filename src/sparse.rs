@@ -11,9 +11,6 @@
 //! - Li et al. (2025), "SINDI: An Efficient Index for Approximate MIPS on Sparse Vectors"
 //!   -- validates sparse dot as a key primitive for production RAG systems
 
-#[cfg(target_arch = "x86_64")]
-use crate::arch;
-
 /// Sparse dot product for sorted index arrays.
 ///
 /// Computes the inner product of two sparse vectors represented as
@@ -62,23 +59,6 @@ pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_valu
         "sparse_dot: b indices/values length mismatch"
     );
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        // Use AVX-512 accelerated index matching when available and inputs are large enough.
-        // The threshold of 16 ensures the SIMD match scan has enough elements to offset
-        // the overhead of collecting match pairs and the indirect value lookups.
-        if a_indices.len() >= 16 && !b_indices.is_empty() && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            let matches =
-                unsafe { arch::x86_64::sparse_match_indices_avx512(a_indices, b_indices) };
-            let mut result = 0.0f32;
-            for (ai, bi) in matches {
-                result += a_values[ai] * b_values[bi];
-            }
-            return result;
-        }
-    }
-
     sparse_dot_portable(a_indices, a_values, b_indices, b_values)
 }
 
@@ -120,6 +100,14 @@ pub fn sparse_dot_portable(
 ///
 /// For SPLADE, the score is typically just dot product of expanded vectors.
 /// But for "Sparse ColBERT" (late interaction over sparse vectors), we need maxsim.
+///
+/// # Assumptions
+///
+/// Designed for SPLADE-style vectors with non-negative weights (ReLU output).
+/// If values can be negative and a query token has zero overlap with all doc
+/// tokens, its contribution will be 0.0 (from `sparse_dot` returning 0.0 for
+/// disjoint indices), which is correct. However, if all overlapping dot products
+/// are negative, the max will be the least-negative value.
 ///
 /// # Arguments
 /// * `query_tokens` - List of sparse vectors for query tokens

@@ -118,8 +118,14 @@ pub(crate) const MIN_DIM_SIMD: usize = 16;
 /// Chosen to be larger than `f32::EPSILON` (~1.19e-7) to provide numerical
 /// headroom while remaining small enough to only catch degenerate cases.
 ///
-/// Used by [`cosine`] to avoid division by zero.
+/// Used by [`normalize`](dense::normalize) to avoid division by zero.
 pub(crate) const NORM_EPSILON: f32 = 1e-9;
+
+/// Squared norm threshold for cosine similarity.
+///
+/// Cosine kernels accumulate `||a||²` and `||b||²` (squared norms), so
+/// they compare against `NORM_EPSILON²` rather than `NORM_EPSILON`.
+pub(crate) const NORM_EPSILON_SQ: f32 = NORM_EPSILON * NORM_EPSILON;
 
 #[cfg(test)]
 mod tests {

@@ -96,7 +96,8 @@ pub unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// # Safety
 ///
-/// NEON is always available on aarch64.
+/// - NEON is always available on aarch64.
+/// - `doc_tokens` must be non-empty; an empty slice causes `NEG_INFINITY` accumulation.
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 pub unsafe fn maxsim_neon(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
@@ -390,7 +391,7 @@ pub unsafe fn cosine_neon(a: &[f32], b: &[f32]) -> f32 {
     }
 
     // Exact normalization (IEEE sqrt + div)
-    if aa > crate::NORM_EPSILON && bb > crate::NORM_EPSILON {
+    if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
         ab / (aa.sqrt() * bb.sqrt())
     } else {
         0.0

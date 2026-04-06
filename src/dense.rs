@@ -16,7 +16,6 @@
 // arch is only used on architectures with SIMD dispatch
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::arch;
-use crate::NORM_EPSILON;
 
 // MIN_DIM_SIMD is only used on architectures with SIMD dispatch
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -157,7 +156,7 @@ pub fn normalize(v: &mut [f32]) {
 ///
 /// # Zero Vector Handling
 ///
-/// Returns `0.0` if either vector has effectively-zero norm (< 1e-9).
+/// Returns `0.0` if either vector has effectively-zero norm.
 /// This avoids division by zero and provides a sensible default for
 /// padding tokens, OOV embeddings, or failed inference.
 ///
@@ -254,7 +253,7 @@ pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
         bb += bi * bi;
     }
 
-    if aa > NORM_EPSILON && bb > NORM_EPSILON {
+    if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
         ab / (aa.sqrt() * bb.sqrt())
     } else {
         0.0

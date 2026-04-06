@@ -396,10 +396,15 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
 /// This is a heuristic method. The pruning threshold is derived by
 /// linearly extrapolating partial distances from the warmup dimensions
 /// to estimate the full distance. This assumes roughly uniform distance
-/// contribution per dimension. For embeddings with non-uniform dimension
-/// importance (e.g., MRL/Matryoshka-trained models where early dimensions
-/// carry more information), the extrapolation may underestimate the true
-/// distance for some vectors and prune the actual nearest neighbor.
+/// contribution per dimension.
+///
+/// **When it works well**: MRL/Matryoshka embeddings where early dimensions
+/// carry more information -- the extrapolation is conservative (overestimates
+/// full distance), so pruning is safe.
+///
+/// **When it fails**: embeddings where later dimensions carry more variance
+/// than early ones. The extrapolation underestimates the full distance,
+/// causing true nearest neighbors to be pruned.
 ///
 /// For guaranteed correctness, use [`batch_knn`] instead.
 #[must_use]
@@ -454,6 +459,9 @@ pub fn batch_knn_adaptive(
         }
     }
 
+    // Reusable buffer for threshold updates (avoids per-iteration allocation)
+    let mut threshold_buf = vec![0.0f32; batch.num_vectors];
+
     // Phase 2: Process remaining dimensions with pruning
     for (d, &q_d) in query
         .iter()
@@ -481,18 +489,20 @@ pub fn batch_knn_adaptive(
             }
         }
 
-        // Update threshold periodically
+        // Update threshold periodically using partial sort (no allocation).
         if d % 32 == 0 {
-            let mut current_best: Vec<f32> = alive
-                .iter()
-                .zip(distances.iter())
-                .filter(|(&a, _)| a)
-                .map(|(_, &d)| d)
-                .collect();
-
-            if current_best.len() >= k {
-                current_best.sort_by(|a, b| a.total_cmp(b));
-                threshold = current_best[k - 1];
+            let buf = &mut threshold_buf[..];
+            let mut count = 0;
+            for (&is_alive, &dist) in alive.iter().zip(distances.iter()) {
+                if is_alive && count < buf.len() {
+                    buf[count] = dist;
+                    count += 1;
+                }
+            }
+            if count >= k {
+                let slice = &mut buf[..count];
+                slice.select_nth_unstable_by(k - 1, |a, b| a.total_cmp(b));
+                threshold = slice[k - 1];
             }
         }
     }
@@ -553,8 +563,6 @@ fn variance_order(variances: &[f32]) -> Vec<usize> {
     order
 }
 
-/// Exact kNN with two-phase variance-ordered processing.
-///
 /// Exact kNN with variance-ordered dimension processing.
 ///
 /// Produces identical results to [`batch_knn`] but processes dimensions

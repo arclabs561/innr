@@ -2,7 +2,7 @@
 # https://github.com/repository-settings/app
 
 repository:
-  description: "Vector similarity primitives"
+  description: "SIMD-accelerated vector similarity primitives"
   homepage: "https://docs.rs/innr"
   private: false
   has_issues: true

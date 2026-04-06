@@ -42,9 +42,6 @@
 //! - Formal et al. (2024). "SPLATE: Sparse Late Interaction Retrieval" (SIGIR)
 //!   -- combines sparse representations with ColBERT-style late interaction,
 //!   bridging learned sparse and multi-vector retrieval.
-//! - Pony et al. (2026). "Col-Bandit: Zero-Shot Query-Time Pruning" -- explores
-//!   pruned/early-exit MaxSim via bandit-based token selection, a future
-//!   direction for reducing the O(|Q| x |D|) cost at query time.
 
 use crate::dense::{cosine, dot};
 

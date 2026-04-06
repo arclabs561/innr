@@ -155,6 +155,17 @@ jobs:
         env:
           PROPTEST_CASES: 2000
 
+  # MSRV check (build only, no tests -- dev-dependencies may require newer Rust)
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check MSRV
+        run: cargo check --all-features
+
   # Dependency linting (licenses, advisories, bans, sources)
   deny:
     name: cargo-deny

@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 New modules:
-- `scalar`: uint8 affine quantization (4x memory compression) with SIMD-accelerated asymmetric dot product (f32 query x u8 corpus). NEON and AVX2 kernels.
+- `scalar`: uint8 affine quantization (4x memory compression) with SIMD-accelerated asymmetric dot product (f32 query x u8 corpus). NEON and AVX2 kernels. Includes `fit_quantile` (outlier-clipping), `fit_vectors` (corpus-wide fit), `query_context` (amortized precomputation), and `batch_knn_u8` (quantized batch search).
 
 Breaking changes:
 - `BatchKnnResult.distances` renamed to `BatchKnnResult.scores` (the field stores similarities for cosine/dot kNN, not distances)

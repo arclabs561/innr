@@ -164,7 +164,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check MSRV
-        run: cargo check --all-features
+        run: |
+          # Cargo.lock v4 requires newer Cargo; regenerate for MSRV toolchain
+          rm -f Cargo.lock
+          cargo check --all-features
 
   # Dependency linting (licenses, advisories, bans, sources)
   deny:

@@ -1164,7 +1164,7 @@ mod tests {
             let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
             let aa: f32 = a.iter().map(|x| x * x).sum();
             let bb: f32 = b.iter().map(|x| x * x).sum();
-            let expected = if aa > 1e-9 && bb > 1e-9 {
+            let expected = if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
                 ab / (aa.sqrt() * bb.sqrt())
             } else {
                 0.0
@@ -1199,7 +1199,7 @@ mod tests {
             let ab: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
             let aa: f32 = a.iter().map(|x| x * x).sum();
             let bb: f32 = b.iter().map(|x| x * x).sum();
-            let expected = if aa > 1e-9 && bb > 1e-9 {
+            let expected = if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
                 ab / (aa.sqrt() * bb.sqrt())
             } else {
                 0.0

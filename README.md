@@ -73,7 +73,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Vectors < 16 dimensions use portable code.
+Vectors < 16 dimensions use portable code. MSRV 1.75 applies to aarch64 and portable targets; x86_64 requires Rust 1.89+ (AVX-512 intrinsic stabilization).
 
 ## Performance
 

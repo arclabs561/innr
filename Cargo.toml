@@ -21,6 +21,8 @@ include = [
     "/README.md",
 ]
 
+[workspace]
+
 [features]
 default = []
 

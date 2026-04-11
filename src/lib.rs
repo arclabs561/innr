@@ -11,6 +11,8 @@
 //! | **Distance (L2)** | [`l2_distance`] | For k-NN, clustering |
 //! | **Token-level matching** | [`maxsim`] | ColBERT-style late interaction |
 //! | **Sparse vectors** | [`sparse_dot`] | BM25 scores, SPLADE |
+//! | **INT8 embeddings** | [`dot_u8`] | Quantized vector search |
+//! | **Binary embeddings** | [`hamming_distance`] | Byte-packed bit vectors |
 //!
 //! # SIMD Dispatch
 //!
@@ -103,9 +105,19 @@ pub mod ternary;
 /// Scalar quantization (uint8) for memory-efficient asymmetric similarity.
 pub mod scalar;
 
+/// Integer quantization primitives: u8 dot product and Hamming distance.
+pub mod quant;
+
+/// Fixed-capacity top-K nearest neighbor tracker for ANN inner-loop use.
+pub mod topk;
+
 pub use sparse::{sparse_dot, sparse_maxsim};
 
 pub use maxsim::{maxsim, maxsim_cosine};
+
+pub use quant::{dot_u8, hamming_distance};
+
+pub use topk::TopK;
 
 /// Minimum vector dimension for SIMD to be worthwhile.
 ///

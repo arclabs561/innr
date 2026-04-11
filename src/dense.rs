@@ -95,12 +95,33 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
 
 /// Portable (non-SIMD) dot product.
 ///
-/// LLVM typically auto-vectorizes this for common architectures,
+/// Uses four independent accumulators to avoid data-dependency stalls on
+/// pipelined CPUs. LLVM can also auto-vectorize this for common architectures,
 /// but explicit SIMD implementations are faster for dimension >= 16.
 #[inline]
 #[must_use]
 pub fn dot_portable(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    let n = a.len().min(b.len());
+    let chunks = n / 4;
+
+    let mut s0 = 0.0f32;
+    let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32;
+    let mut s3 = 0.0f32;
+
+    for i in 0..chunks {
+        let base = i * 4;
+        s0 += a[base] * b[base];
+        s1 += a[base + 1] * b[base + 1];
+        s2 += a[base + 2] * b[base + 2];
+        s3 += a[base + 3] * b[base + 3];
+    }
+
+    let mut result = s0 + s1 + s2 + s3;
+    for i in (chunks * 4)..n {
+        result += a[i] * b[i];
+    }
+    result
 }
 
 /// L2 norm (Euclidean norm) of a vector: `sqrt(Σ(v[i]²))`.

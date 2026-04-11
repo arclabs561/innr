@@ -1121,8 +1121,8 @@ pub unsafe fn dot_u8_avx512(a: &[u8], b: &[u8]) -> u32 {
     for i in 0..chunks_64 {
         let base = i * 64;
         // Load 64 x u8
-        let va = _mm512_loadu_si512(a_ptr.add(base) as *const __m512i);
-        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const __m512i);
+        let va = _mm512_loadu_si512(a_ptr.add(base) as *const i32);
+        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const i32);
 
         // Split 512-bit -> two 256-bit halves, then widen u8->i16 (256->512)
         let va_lo16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(va, 0));
@@ -1247,8 +1247,8 @@ pub unsafe fn hamming_avx512(a: &[u8], b: &[u8]) -> u32 {
 
     for i in 0..chunks_64 {
         let base = i * 64;
-        let va = _mm512_loadu_si512(a_ptr.add(base) as *const __m512i);
-        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const __m512i);
+        let va = _mm512_loadu_si512(a_ptr.add(base) as *const i32);
+        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const i32);
         let xored = _mm512_xor_si512(va, vb);
         // popcnt_epi64: count bits in each of 8 x u64
         let cnt = _mm512_popcnt_epi64(xored);

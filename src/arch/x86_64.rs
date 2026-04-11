@@ -1075,7 +1075,10 @@ pub unsafe fn dot_u8_avx2(a: &[u8], b: &[u8]) -> u32 {
     // Horizontal sum of acc32 (8 x i32)
     let hi128 = _mm256_permute2x128_si256(acc32, acc32, 0x01);
     let sum128 = _mm256_add_epi32(acc32, hi128);
-    let result: u32 = (0..4).map(|i| _mm256_extract_epi32(sum128, i) as u32).sum();
+    let result: u32 = (_mm256_extract_epi32(sum128, 0) as u32)
+        .wrapping_add(_mm256_extract_epi32(sum128, 1) as u32)
+        .wrapping_add(_mm256_extract_epi32(sum128, 2) as u32)
+        .wrapping_add(_mm256_extract_epi32(sum128, 3) as u32);
 
     // Scalar tail
     let tail_start = chunks_32 * 32;
@@ -1201,8 +1204,11 @@ pub unsafe fn hamming_avx2(a: &[u8], b: &[u8]) -> u32 {
         acc = _mm256_add_epi64(acc, byte_cnt);
     }
 
-    // Horizontal sum of 4 x i64
-    let mut result: u32 = (0..4).map(|i| _mm256_extract_epi64(acc, i) as u32).sum();
+    // Horizontal sum of 4 x i64 (extract requires const index)
+    let mut result: u32 = (_mm256_extract_epi64(acc, 0) as u32)
+        .wrapping_add(_mm256_extract_epi64(acc, 1) as u32)
+        .wrapping_add(_mm256_extract_epi64(acc, 2) as u32)
+        .wrapping_add(_mm256_extract_epi64(acc, 3) as u32);
 
     // Scalar tail
     for i in (chunks_32 * 32)..n {

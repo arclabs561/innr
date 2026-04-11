@@ -475,6 +475,123 @@ pub unsafe fn dot_u8_f32_neon(a: &[f32], b: &[u8]) -> f32 {
     result
 }
 
+/// NEON u8×u8 dot product using `vmull_u8` + `vpadalq_u16` + `vpadalq_u32`.
+///
+/// Processes 16 bytes per iteration: u8×u8 -> u16 (8 lanes), then pairwise
+/// accumulate to u32 (4 lanes), then u64 (2 lanes) every 256 iterations to
+/// prevent overflow.
+///
+/// Overflow analysis: each u16 can hold at most 255*255=65025. With 16 elements
+/// per iteration widened to 8 x u16, and vpadalq_u16 summing adjacent pairs to
+/// u32 (4 lanes), each u32 lane accumulates at most 2 * 65025 per iteration.
+/// Draining to u64 every 256 iterations keeps each u32 lane below
+/// 256 * 2 * 65025 ≈ 33.3M, well under u32::MAX.
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn dot_u8_neon(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::aarch64::{
+        uint32x4_t, vaddlvq_u32, vdupq_n_u32, vget_high_u8, vget_low_u8, vld1q_u8, vmull_u8,
+        vpadalq_u16,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_16 = n / 16;
+    let mut total: u64 = 0;
+    let mut iter = 0usize;
+
+    while iter < chunks_16 {
+        let block = (chunks_16 - iter).min(256);
+        let mut acc32: uint32x4_t = vdupq_n_u32(0);
+
+        for j in 0..block {
+            let base = (iter + j) * 16;
+            let va = vld1q_u8(a_ptr.add(base));
+            let vb = vld1q_u8(b_ptr.add(base));
+            // vmull_u8: 8 x u8 * 8 x u8 -> 8 x u16 (low half)
+            let prod_lo = vmull_u8(vget_low_u8(va), vget_low_u8(vb));
+            let prod_hi = vmull_u8(vget_high_u8(va), vget_high_u8(vb));
+            // vpadalq_u16: pairwise add adjacent u16 -> u32
+            acc32 = vpadalq_u16(acc32, prod_lo);
+            acc32 = vpadalq_u16(acc32, prod_hi);
+        }
+
+        // vaddlvq_u32: horizontal sum to u64
+        total += vaddlvq_u32(acc32) as u64;
+        iter += block;
+    }
+
+    // Scalar tail
+    let tail_start = chunks_16 * 16;
+    for i in tail_start..n {
+        total += *a.get_unchecked(i) as u64 * *b.get_unchecked(i) as u64;
+    }
+
+    total as u32
+}
+
+/// NEON Hamming distance using `veorq_u8` + `vcntq_u8` (per-byte popcount).
+///
+/// `vcntq_u8` counts set bits in each byte in a single instruction.
+/// Uses `vpaddlq_u8` -> `vpaddlq_u16` -> `vpaddlq_u32` to widen the per-byte
+/// counts to u32 before accumulating.
+///
+/// # Safety
+///
+/// NEON is always available on aarch64.
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn hamming_neon(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::aarch64::{
+        uint32x4_t, vaddlvq_u32, vaddq_u32, vcntq_u8, vdupq_n_u32, veorq_u8, vld1q_u8, vpaddlq_u16,
+        vpaddlq_u8,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_16 = n / 16;
+    let mut acc32: uint32x4_t = vdupq_n_u32(0);
+
+    for i in 0..chunks_16 {
+        let base = i * 16;
+        let va = vld1q_u8(a_ptr.add(base));
+        let vb = vld1q_u8(b_ptr.add(base));
+        let xored = veorq_u8(va, vb);
+        // vcntq_u8: per-byte popcount (0..=8 per lane)
+        let cnt8 = vcntq_u8(xored);
+        // Widen: u8x16 -> u16x8 -> u32x4
+        let cnt16 = vpaddlq_u8(cnt8);
+        let cnt32 = vpaddlq_u16(cnt16);
+        acc32 = vaddq_u32(acc32, cnt32);
+    }
+
+    let mut result = vaddlvq_u32(acc32) as u32;
+
+    // Scalar tail
+    let tail_start = chunks_16 * 16;
+    for i in tail_start..n {
+        result += (*a.get_unchecked(i) ^ *b.get_unchecked(i)).count_ones();
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

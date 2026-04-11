@@ -1019,6 +1019,246 @@ pub unsafe fn dot_u8_f32_avx2(a: &[f32], b: &[u8]) -> f32 {
     result
 }
 
+/// AVX2 u8×u8 dot product.
+///
+/// Loads 32 bytes per iteration, widens each 16-byte half from u8 to i16 via
+/// `_mm256_cvtepu8_epi16`, then multiplies and accumulates to i32 via
+/// `_mm256_madd_epi16`. Accumulates directly to i32 — no periodic drain needed
+/// since each `madd` step produces at most 2 * 255^2 = 130050 < i32::MAX.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn dot_u8_avx2(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::x86_64::{
+        __m256i, _mm256_add_epi32, _mm256_castsi256_si128, _mm256_cvtepu8_epi16,
+        _mm256_extract_epi32, _mm256_extracti128_si256, _mm256_lddqu_si256, _mm256_madd_epi16,
+        _mm256_permute2x128_si256, _mm256_set1_epi16, _mm256_setzero_si256,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let ones16 = _mm256_set1_epi16(1);
+    let mut acc32: __m256i = _mm256_setzero_si256();
+
+    let chunks_32 = n / 32;
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+        // Load 32 x u8 each
+        let va = _mm256_lddqu_si256(a_ptr.add(base) as *const __m256i);
+        let vb = _mm256_lddqu_si256(b_ptr.add(base) as *const __m256i);
+
+        // Widen low 16 bytes (u8 -> i16) from each vector
+        let va_lo = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(va));
+        let vb_lo = _mm256_cvtepu8_epi16(_mm256_castsi256_si128(vb));
+        // Widen high 16 bytes (u8 -> i16)
+        let va_hi = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(va, 1));
+        let vb_hi = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(vb, 1));
+
+        // madd_epi16: multiply 16xi16 pairs and add adjacent -> 8xi32
+        let prod_lo = _mm256_madd_epi16(va_lo, vb_lo);
+        let prod_hi = _mm256_madd_epi16(va_hi, vb_hi);
+        acc32 = _mm256_add_epi32(acc32, prod_lo);
+        acc32 = _mm256_add_epi32(acc32, prod_hi);
+        let _ = ones16;
+    }
+
+    // Horizontal sum of acc32 (8 x i32)
+    let hi128 = _mm256_permute2x128_si256(acc32, acc32, 0x01);
+    let sum128 = _mm256_add_epi32(acc32, hi128);
+    let result: u32 = (0..4).map(|i| _mm256_extract_epi32(sum128, i) as u32).sum();
+
+    // Scalar tail
+    let tail_start = chunks_32 * 32;
+    let tail: u32 = (tail_start..n)
+        .map(|i| *a.get_unchecked(i) as u32 * *b.get_unchecked(i) as u32)
+        .sum();
+
+    result.wrapping_add(tail)
+}
+
+/// AVX-512BW u8×u8 dot product.
+///
+/// Loads 64 bytes per iteration. Splits each 512-bit register into two 256-bit
+/// halves, widens u8->i16 via `_mm512_cvtepu8_epi16`, multiplies and
+/// accumulates to i32 via `_mm512_madd_epi16`.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512bw")` and
+/// `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f", enable = "avx512bw")]
+pub unsafe fn dot_u8_avx512(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::x86_64::{
+        __m512i, _mm512_add_epi32, _mm512_cvtepu8_epi16, _mm512_extracti64x4_epi64,
+        _mm512_loadu_si512, _mm512_madd_epi16, _mm512_reduce_add_epi32, _mm512_setzero_si512,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let mut acc32: __m512i = _mm512_setzero_si512();
+    let chunks_64 = n / 64;
+
+    for i in 0..chunks_64 {
+        let base = i * 64;
+        // Load 64 x u8
+        let va = _mm512_loadu_si512(a_ptr.add(base) as *const __m512i);
+        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const __m512i);
+
+        // Split 512-bit -> two 256-bit halves, then widen u8->i16 (256->512)
+        let va_lo16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(va, 0));
+        let vb_lo16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(vb, 0));
+        let va_hi16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(va, 1));
+        let vb_hi16 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(vb, 1));
+
+        // madd_epi16: 32xi16 * 32xi16 -> 16xi32 (adjacent pairs summed)
+        let prod_lo = _mm512_madd_epi16(va_lo16, vb_lo16);
+        let prod_hi = _mm512_madd_epi16(va_hi16, vb_hi16);
+        acc32 = _mm512_add_epi32(acc32, prod_lo);
+        acc32 = _mm512_add_epi32(acc32, prod_hi);
+    }
+
+    let mut result = _mm512_reduce_add_epi32(acc32) as u32;
+
+    // Scalar tail
+    let tail_start = chunks_64 * 64;
+    for i in tail_start..n {
+        result = result.wrapping_add(*a.get_unchecked(i) as u32 * *b.get_unchecked(i) as u32);
+    }
+
+    result
+}
+
+/// AVX2 Hamming distance using VPSHUFB nibble-LUT popcount.
+///
+/// XORs 32 bytes at a time, then counts set bits using the Muła/Harley-Seal
+/// VPSHUFB-based popcount: split each byte into high/low nibbles, look up a
+/// 16-entry table, sum the counts.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx2")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn hamming_avx2(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::x86_64::{
+        __m256i, _mm256_add_epi64, _mm256_and_si256, _mm256_extract_epi64, _mm256_lddqu_si256,
+        _mm256_sad_epu8, _mm256_set1_epi8, _mm256_setr_epi8, _mm256_setzero_si256,
+        _mm256_shuffle_epi8, _mm256_srli_epi16, _mm256_xor_si256,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    // Popcount LUT: popcount of nibble 0..=15
+    let lut = _mm256_setr_epi8(
+        0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, // lo 128-bit lane
+        0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, // hi 128-bit lane (same)
+    );
+    let lo_mask = _mm256_set1_epi8(0x0F_u8 as i8);
+
+    let chunks_32 = n / 32;
+    let mut acc: __m256i = _mm256_setzero_si256();
+
+    for i in 0..chunks_32 {
+        let base = i * 32;
+        let va = _mm256_lddqu_si256(a_ptr.add(base) as *const __m256i);
+        let vb = _mm256_lddqu_si256(b_ptr.add(base) as *const __m256i);
+        let xored = _mm256_xor_si256(va, vb);
+
+        // Count bits: popcount via nibble LUT
+        let lo_nibbles = _mm256_and_si256(xored, lo_mask);
+        let hi_nibbles = _mm256_and_si256(_mm256_srli_epi16(xored, 4), lo_mask);
+        let lo_cnt = _mm256_shuffle_epi8(lut, lo_nibbles);
+        let hi_cnt = _mm256_shuffle_epi8(lut, hi_nibbles);
+
+        // SAD (sum of absolute differences vs 0) accumulates byte-wise counts into u64s
+        let byte_cnt = _mm256_add_epi64(
+            _mm256_sad_epu8(lo_cnt, _mm256_setzero_si256()),
+            _mm256_sad_epu8(hi_cnt, _mm256_setzero_si256()),
+        );
+        acc = _mm256_add_epi64(acc, byte_cnt);
+    }
+
+    // Horizontal sum of 4 x i64
+    let mut result: u32 = (0..4).map(|i| _mm256_extract_epi64(acc, i) as u32).sum();
+
+    // Scalar tail
+    for i in (chunks_32 * 32)..n {
+        result += (*a.get_unchecked(i) ^ *b.get_unchecked(i)).count_ones();
+    }
+
+    result
+}
+
+/// AVX-512 Hamming distance using `_mm512_popcnt_epi64` (VPOPCNTDQ).
+///
+/// XORs 64 bytes at a time, then uses hardware popcount on 8 u64s.
+///
+/// # Safety
+///
+/// Caller must verify `is_x86_feature_detected!("avx512vpopcntdq")` and
+/// `is_x86_feature_detected!("avx512f")` before calling.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f", enable = "avx512vpopcntdq")]
+pub unsafe fn hamming_avx512(a: &[u8], b: &[u8]) -> u32 {
+    use std::arch::x86_64::{
+        __m512i, _mm512_add_epi64, _mm512_loadu_si512, _mm512_popcnt_epi64,
+        _mm512_reduce_add_epi64, _mm512_setzero_si512, _mm512_xor_si512,
+    };
+
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0;
+    }
+
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_64 = n / 64;
+    let mut acc: __m512i = _mm512_setzero_si512();
+
+    for i in 0..chunks_64 {
+        let base = i * 64;
+        let va = _mm512_loadu_si512(a_ptr.add(base) as *const __m512i);
+        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const __m512i);
+        let xored = _mm512_xor_si512(va, vb);
+        // popcnt_epi64: count bits in each of 8 x u64
+        let cnt = _mm512_popcnt_epi64(xored);
+        acc = _mm512_add_epi64(acc, cnt);
+    }
+
+    let mut result = _mm512_reduce_add_epi64(acc) as u32;
+
+    // Scalar tail
+    for i in (chunks_64 * 64)..n {
+        result += (*a.get_unchecked(i) ^ *b.get_unchecked(i)).count_ones();
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

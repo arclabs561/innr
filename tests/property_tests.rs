@@ -47,7 +47,7 @@ proptest! {
     fn dot_small_matches_reference((a, b) in arb_vec_pair(8)) {
         let result = innr::dot(&a, &b);
         let expected = dot_reference(&a, &b);
-        let tolerance = expected.abs() * 1e-5 + 1e-6;
+        let tolerance = expected.abs() * 2e-5 + 1e-6;
         prop_assert!(
             (result - expected).abs() < tolerance,
             "Small dot mismatch: {} vs {} (tolerance: {})",

@@ -1035,7 +1035,7 @@ pub unsafe fn dot_u8_avx2(a: &[u8], b: &[u8]) -> u32 {
     use std::arch::x86_64::{
         __m256i, _mm256_add_epi32, _mm256_castsi256_si128, _mm256_cvtepu8_epi16,
         _mm256_extract_epi32, _mm256_extracti128_si256, _mm256_lddqu_si256, _mm256_madd_epi16,
-        _mm256_permute2x128_si256, _mm256_set1_epi16, _mm256_setzero_si256,
+        _mm256_permute2x128_si256, _mm256_setzero_si256,
     };
 
     let n = a.len().min(b.len());
@@ -1046,7 +1046,6 @@ pub unsafe fn dot_u8_avx2(a: &[u8], b: &[u8]) -> u32 {
     let a_ptr = a.as_ptr();
     let b_ptr = b.as_ptr();
 
-    let ones16 = _mm256_set1_epi16(1);
     let mut acc32: __m256i = _mm256_setzero_si256();
 
     let chunks_32 = n / 32;
@@ -1069,7 +1068,6 @@ pub unsafe fn dot_u8_avx2(a: &[u8], b: &[u8]) -> u32 {
         let prod_hi = _mm256_madd_epi16(va_hi, vb_hi);
         acc32 = _mm256_add_epi32(acc32, prod_lo);
         acc32 = _mm256_add_epi32(acc32, prod_hi);
-        let _ = ones16;
     }
 
     // Horizontal sum of acc32 (8 x i32)

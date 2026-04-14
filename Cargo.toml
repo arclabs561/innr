@@ -38,6 +38,14 @@ rand = "0.9"
 [[example]]
 name = "maxsim_colbert"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+
 [[bench]]
 name = "dense"
 harness = false

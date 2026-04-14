@@ -53,6 +53,12 @@ jobs:
       - name: Numerical edge cases
         run: cargo test --test numerical_edge_cases --all-features
 
+      - name: Semver check
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo install cargo-semver-checks --locked || true
+          cargo semver-checks
+
   # Compile-only AVX-512 build (no execution).
   #
   # This catches bitrot in AVX-512-specialized code without requiring AVX-512 hardware.

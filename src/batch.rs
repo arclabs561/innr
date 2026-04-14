@@ -371,14 +371,16 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
     // Full distance computation first
     let distances = batch_l2_squared(query, batch);
 
-    // Find k smallest
-    let mut indexed: Vec<(usize, f32)> = distances.into_iter().enumerate().collect();
-    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
-    indexed.truncate(k);
+    // Feed into TopK -- avoids a separate Vec allocation and two map().collect() passes.
+    let mut topk = crate::TopK::new(k);
+    for (i, dist) in distances.into_iter().enumerate() {
+        topk.insert(i as u32, dist);
+    }
 
+    let results = topk.into_sorted();
     BatchKnnResult {
-        indices: indexed.iter().map(|(i, _)| *i).collect(),
-        scores: indexed.iter().map(|(_, d)| *d).collect(),
+        indices: results.iter().map(|(i, _)| *i as usize).collect(),
+        scores: results.iter().map(|(_, d)| *d).collect(),
     }
 }
 

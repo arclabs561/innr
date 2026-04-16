@@ -43,15 +43,24 @@ proptest! {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Dot product matches reference for small vectors (below SIMD threshold).
+    ///
+    /// Tolerance scales with the sum of |products| rather than |result| to
+    /// handle cancellation: when positive and negative terms cancel, |result|
+    /// can be tiny while intermediate magnitudes are large. The 4-way
+    /// accumulator in dot_portable uses a different summation order than the
+    /// sequential reference, producing O(n * eps * sum|a_i*b_i|) error.
     #[test]
     fn dot_small_matches_reference((a, b) in arb_vec_pair(8)) {
         let result = innr::dot(&a, &b);
         let expected = dot_reference(&a, &b);
-        let tolerance = expected.abs() * 2e-5 + 1e-6;
+        let sum_abs_products: f32 = a.iter().zip(b.iter())
+            .map(|(x, y)| (x * y).abs())
+            .sum();
+        let tolerance = sum_abs_products * 1e-5 + 1e-4;
         prop_assert!(
             (result - expected).abs() < tolerance,
-            "Small dot mismatch: {} vs {} (tolerance: {})",
-            result, expected, tolerance
+            "Small dot mismatch: {} vs {} (diff: {}, tol: {})",
+            result, expected, (result - expected).abs(), tolerance
         );
     }
 

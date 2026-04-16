@@ -25,6 +25,7 @@ include = [
 
 [features]
 default = []
+sparse = []
 
 [dependencies]
 # No dependencies for core operations - just std

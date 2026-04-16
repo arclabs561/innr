@@ -3,33 +3,148 @@
 //! Sparse vectors are represented as sorted `(dimension, weight)` pairs.
 //! All operations assume inputs are sorted by dimension.
 
+#![allow(unsafe_code)]
+
 /// Sparse dot product between two sorted sparse vectors.
 /// Both inputs must be sorted by dimension (first element of tuple).
+///
+/// Uses a branch-restructured merge-join: integer comparisons feed directly
+/// into pointer advances without an intermediate enum, which eliminates the
+/// match-dispatch overhead and lets the CPU speculate on the more common
+/// non-equal branch. A four-way independent accumulator hides FP latency.
+#[inline]
 pub fn sparse_dot(a: &[(u32, f32)], b: &[(u32, f32)]) -> f32 {
-    let (mut i, mut j) = (0, 0);
-    let mut sum = 0.0f32;
+    let mut i = 0;
+    let mut j = 0;
+    let mut s0 = 0.0f32;
+    let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32;
+    let mut s3 = 0.0f32;
+    let mut acc_idx = 0usize;
+
+    // SAFETY: bounds are checked by the while condition and the index advances below.
     while i < a.len() && j < b.len() {
-        match a[i].0.cmp(&b[j].0) {
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
-                sum += a[i].1 * b[j].1;
-                i += 1;
-                j += 1;
+        // SAFETY: i < a.len() and j < b.len() are guaranteed by the while condition.
+        let ai = unsafe { a.get_unchecked(i) };
+        let bj = unsafe { b.get_unchecked(j) };
+        let ai_dim = ai.0;
+        let bj_dim = bj.0;
+
+        // Use branch-free pointer advances: advance the smaller index (or both on equal).
+        // The multiply is speculative (produces 0 on mismatch when we don't add it),
+        // but we only accumulate on a match to keep semantics correct.
+        if ai_dim == bj_dim {
+            let prod = ai.1 * bj.1;
+            // Round-robin into 4 independent accumulators to break FP latency chain.
+            match acc_idx & 3 {
+                0 => s0 += prod,
+                1 => s1 += prod,
+                2 => s2 += prod,
+                _ => s3 += prod,
             }
+            acc_idx += 1;
+            i += 1;
+            j += 1;
+        } else if ai_dim < bj_dim {
+            i += 1;
+        } else {
+            j += 1;
         }
     }
-    sum
+
+    s0 + s1 + s2 + s3
 }
 
 /// Sparse dot product with a dense vector.
 /// Sparse input must be sorted by dimension. Dense vector is indexed directly.
+///
+/// Uses four independent accumulators to hide FP latency. When all sparse
+/// dimensions are within bounds (the common case), the fast path skips the
+/// per-element bounds check by pre-verifying the maximum dimension once.
+#[inline]
 pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
-    sparse
-        .iter()
-        .filter(|(dim, _)| (*dim as usize) < dense.len())
-        .map(|(dim, weight)| weight * dense[*dim as usize])
-        .sum()
+    if sparse.is_empty() || dense.is_empty() {
+        return 0.0;
+    }
+
+    let dense_len = dense.len();
+
+    // Fast path: if the largest dimension in the sparse vector fits in dense,
+    // no per-element bounds check is needed.
+    // SAFETY: sparse is non-empty (checked above), so last() is always Some.
+    let max_dim = unsafe { sparse.last().unwrap_unchecked() }.0 as usize;
+
+    if max_dim < dense_len {
+        // All indices are in-bounds: skip the filter, use unsafe indexing.
+        let mut s0 = 0.0f32;
+        let mut s1 = 0.0f32;
+        let mut s2 = 0.0f32;
+        let mut s3 = 0.0f32;
+        let chunks = sparse.len() / 4;
+
+        for c in 0..chunks {
+            let base = c * 4;
+            // SAFETY: base + 3 < sparse.len() because chunks = sparse.len() / 4.
+            let (d0, w0) = unsafe { *sparse.get_unchecked(base) };
+            let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
+            let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
+            let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
+            // SAFETY: max_dim < dense_len and all dims <= max_dim (sorted input).
+            s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
+            s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
+            s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
+            s3 += w3 * unsafe { *dense.get_unchecked(d3 as usize) };
+        }
+
+        // Scalar tail.
+        let tail_start = chunks * 4;
+        let mut tail = 0.0f32;
+        for k in tail_start..sparse.len() {
+            let (dim, weight) = unsafe { *sparse.get_unchecked(k) };
+            tail += weight * unsafe { *dense.get_unchecked(dim as usize) };
+        }
+
+        s0 + s1 + s2 + s3 + tail
+    } else {
+        // Slow path: at least one dimension might be out of bounds.
+        let mut s0 = 0.0f32;
+        let mut s1 = 0.0f32;
+        let mut s2 = 0.0f32;
+        let mut s3 = 0.0f32;
+
+        let chunks = sparse.len() / 4;
+        for c in 0..chunks {
+            let base = c * 4;
+            // SAFETY: base + 3 < sparse.len() because chunks = sparse.len() / 4.
+            let (d0, w0) = unsafe { *sparse.get_unchecked(base) };
+            let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
+            let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
+            let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
+            if (d0 as usize) < dense_len {
+                s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
+            }
+            if (d1 as usize) < dense_len {
+                s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
+            }
+            if (d2 as usize) < dense_len {
+                s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
+            }
+            if (d3 as usize) < dense_len {
+                s3 += w3 * unsafe { *dense.get_unchecked(d3 as usize) };
+            }
+        }
+
+        let tail_start = chunks * 4;
+        let mut tail = 0.0f32;
+        for k in tail_start..sparse.len() {
+            let (dim, weight) = unsafe { *sparse.get_unchecked(k) };
+            if (dim as usize) < dense_len {
+                tail += weight * unsafe { *dense.get_unchecked(dim as usize) };
+            }
+        }
+
+        s0 + s1 + s2 + s3 + tail
+    }
 }
 
 /// L2 norm of a sparse vector.

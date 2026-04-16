@@ -84,6 +84,10 @@ pub mod batch;
 /// Sparse vector dot product via sorted-index merge join.
 mod sparse;
 
+/// Sparse vector primitives for learned sparse retrieval (tuple-based API).
+#[cfg(feature = "sparse")]
+pub mod sparse_ext;
+
 /// ColBERT MaxSim late interaction scoring for multi-vector retrieval.
 mod maxsim;
 

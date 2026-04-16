@@ -261,14 +261,36 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// Portable (non-SIMD) cosine similarity.
 ///
 /// Single-pass: accumulates dot(a,b), ||a||^2, ||b||^2 simultaneously.
+/// Four independent accumulators per quantity break the FP latency chain
+/// and allow CPUs to execute multiple multiply-adds in parallel.
 #[inline]
 #[must_use]
 pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
-    let mut ab = 0.0f32;
-    let mut aa = 0.0f32;
-    let mut bb = 0.0f32;
+    let n = a.len().min(b.len());
+    let chunks = n / 4;
 
-    for (&ai, &bi) in a.iter().zip(b.iter()) {
+    let mut ab0 = 0.0f32; let mut ab1 = 0.0f32; let mut ab2 = 0.0f32; let mut ab3 = 0.0f32;
+    let mut aa0 = 0.0f32; let mut aa1 = 0.0f32; let mut aa2 = 0.0f32; let mut aa3 = 0.0f32;
+    let mut bb0 = 0.0f32; let mut bb1 = 0.0f32; let mut bb2 = 0.0f32; let mut bb3 = 0.0f32;
+
+    for i in 0..chunks {
+        let base = i * 4;
+        let a0 = a[base];     let b0 = b[base];
+        let a1 = a[base + 1]; let b1 = b[base + 1];
+        let a2 = a[base + 2]; let b2 = b[base + 2];
+        let a3 = a[base + 3]; let b3 = b[base + 3];
+        ab0 += a0 * b0; aa0 += a0 * a0; bb0 += b0 * b0;
+        ab1 += a1 * b1; aa1 += a1 * a1; bb1 += b1 * b1;
+        ab2 += a2 * b2; aa2 += a2 * a2; bb2 += b2 * b2;
+        ab3 += a3 * b3; aa3 += a3 * a3; bb3 += b3 * b3;
+    }
+
+    let mut ab = ab0 + ab1 + ab2 + ab3;
+    let mut aa = aa0 + aa1 + aa2 + aa3;
+    let mut bb = bb0 + bb1 + bb2 + bb3;
+
+    for i in (chunks * 4)..n {
+        let ai = a[i]; let bi = b[i];
         ab += ai * bi;
         aa += ai * ai;
         bb += bi * bi;
@@ -470,10 +492,30 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Portable (non-SIMD) L1 distance.
+///
+/// Four independent accumulators break the FP latency chain.
 #[inline]
 #[must_use]
 pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
+    let n = a.len().min(b.len());
+    let chunks = n / 4;
+
+    let mut s0 = 0.0f32; let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32; let mut s3 = 0.0f32;
+
+    for i in 0..chunks {
+        let base = i * 4;
+        s0 += (a[base]     - b[base]).abs();
+        s1 += (a[base + 1] - b[base + 1]).abs();
+        s2 += (a[base + 2] - b[base + 2]).abs();
+        s3 += (a[base + 3] - b[base + 3]).abs();
+    }
+
+    let mut result = s0 + s1 + s2 + s3;
+    for i in (chunks * 4)..n {
+        result += (a[i] - b[i]).abs();
+    }
+    result
 }
 
 /// Squared L2 distance: `Σ(a[i] - b[i])²`.
@@ -546,10 +588,35 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Portable (non-SIMD) squared L2 distance.
+///
+/// Four independent accumulators break the FP latency chain.
 #[inline]
 #[must_use]
 pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
+    let n = a.len().min(b.len());
+    let chunks = n / 4;
+
+    let mut s0 = 0.0f32; let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32; let mut s3 = 0.0f32;
+
+    for i in 0..chunks {
+        let base = i * 4;
+        let d0 = a[base]     - b[base];
+        let d1 = a[base + 1] - b[base + 1];
+        let d2 = a[base + 2] - b[base + 2];
+        let d3 = a[base + 3] - b[base + 3];
+        s0 += d0 * d0;
+        s1 += d1 * d1;
+        s2 += d2 * d2;
+        s3 += d3 * d3;
+    }
+
+    let mut result = s0 + s1 + s2 + s3;
+    for i in (chunks * 4)..n {
+        let d = a[i] - b[i];
+        result += d * d;
+    }
+    result
 }
 
 #[cfg(test)]

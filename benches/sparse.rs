@@ -79,13 +79,9 @@ fn bench_sparse_ext(c: &mut Criterion) {
             let a = random_sparse_tuples(nnz, vocab_size);
             let b = random_sparse_tuples(nnz, vocab_size);
             group.throughput(Throughput::Elements((nnz * 2) as u64));
-            group.bench_with_input(
-                BenchmarkId::new("sparse_dot", nnz),
-                &nnz,
-                |bench, _| {
-                    bench.iter(|| ext_sparse_dot(black_box(&a), black_box(&b)))
-                },
-            );
+            group.bench_with_input(BenchmarkId::new("sparse_dot", nnz), &nnz, |bench, _| {
+                bench.iter(|| ext_sparse_dot(black_box(&a), black_box(&b)))
+            });
         }
         group.finish();
     }
@@ -99,9 +95,7 @@ fn bench_sparse_ext(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new("sparse_dense_dot", nnz),
                 &nnz,
-                |bench, _| {
-                    bench.iter(|| sparse_dense_dot(black_box(&sparse), black_box(&dense)))
-                },
+                |bench, _| bench.iter(|| sparse_dense_dot(black_box(&sparse), black_box(&dense))),
             );
         }
         group.finish();

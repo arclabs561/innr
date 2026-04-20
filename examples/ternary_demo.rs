@@ -336,7 +336,7 @@ fn demo_ranking_accuracy() {
             .enumerate()
             .map(|(i, d)| (i, ternary_dot(&query_ternary, d)))
             .collect();
-        tern_scores.sort_by(|a, b| b.1.cmp(&a.1));
+        tern_scores.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Compute rank correlation (Spearman) for top 100
         let k = 100;

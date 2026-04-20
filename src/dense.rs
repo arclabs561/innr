@@ -269,20 +269,41 @@ pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
-    let mut ab0 = 0.0f32; let mut ab1 = 0.0f32; let mut ab2 = 0.0f32; let mut ab3 = 0.0f32;
-    let mut aa0 = 0.0f32; let mut aa1 = 0.0f32; let mut aa2 = 0.0f32; let mut aa3 = 0.0f32;
-    let mut bb0 = 0.0f32; let mut bb1 = 0.0f32; let mut bb2 = 0.0f32; let mut bb3 = 0.0f32;
+    let mut ab0 = 0.0f32;
+    let mut ab1 = 0.0f32;
+    let mut ab2 = 0.0f32;
+    let mut ab3 = 0.0f32;
+    let mut aa0 = 0.0f32;
+    let mut aa1 = 0.0f32;
+    let mut aa2 = 0.0f32;
+    let mut aa3 = 0.0f32;
+    let mut bb0 = 0.0f32;
+    let mut bb1 = 0.0f32;
+    let mut bb2 = 0.0f32;
+    let mut bb3 = 0.0f32;
 
     for i in 0..chunks {
         let base = i * 4;
-        let a0 = a[base];     let b0 = b[base];
-        let a1 = a[base + 1]; let b1 = b[base + 1];
-        let a2 = a[base + 2]; let b2 = b[base + 2];
-        let a3 = a[base + 3]; let b3 = b[base + 3];
-        ab0 += a0 * b0; aa0 += a0 * a0; bb0 += b0 * b0;
-        ab1 += a1 * b1; aa1 += a1 * a1; bb1 += b1 * b1;
-        ab2 += a2 * b2; aa2 += a2 * a2; bb2 += b2 * b2;
-        ab3 += a3 * b3; aa3 += a3 * a3; bb3 += b3 * b3;
+        let a0 = a[base];
+        let b0 = b[base];
+        let a1 = a[base + 1];
+        let b1 = b[base + 1];
+        let a2 = a[base + 2];
+        let b2 = b[base + 2];
+        let a3 = a[base + 3];
+        let b3 = b[base + 3];
+        ab0 += a0 * b0;
+        aa0 += a0 * a0;
+        bb0 += b0 * b0;
+        ab1 += a1 * b1;
+        aa1 += a1 * a1;
+        bb1 += b1 * b1;
+        ab2 += a2 * b2;
+        aa2 += a2 * a2;
+        bb2 += b2 * b2;
+        ab3 += a3 * b3;
+        aa3 += a3 * a3;
+        bb3 += b3 * b3;
     }
 
     let mut ab = ab0 + ab1 + ab2 + ab3;
@@ -290,7 +311,8 @@ pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
     let mut bb = bb0 + bb1 + bb2 + bb3;
 
     for i in (chunks * 4)..n {
-        let ai = a[i]; let bi = b[i];
+        let ai = a[i];
+        let bi = b[i];
         ab += ai * bi;
         aa += ai * ai;
         bb += bi * bi;
@@ -500,12 +522,14 @@ pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
-    let mut s0 = 0.0f32; let mut s1 = 0.0f32;
-    let mut s2 = 0.0f32; let mut s3 = 0.0f32;
+    let mut s0 = 0.0f32;
+    let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32;
+    let mut s3 = 0.0f32;
 
     for i in 0..chunks {
         let base = i * 4;
-        s0 += (a[base]     - b[base]).abs();
+        s0 += (a[base] - b[base]).abs();
         s1 += (a[base + 1] - b[base + 1]).abs();
         s2 += (a[base + 2] - b[base + 2]).abs();
         s3 += (a[base + 3] - b[base + 3]).abs();
@@ -596,12 +620,14 @@ pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
-    let mut s0 = 0.0f32; let mut s1 = 0.0f32;
-    let mut s2 = 0.0f32; let mut s3 = 0.0f32;
+    let mut s0 = 0.0f32;
+    let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32;
+    let mut s3 = 0.0f32;
 
     for i in 0..chunks {
         let base = i * 4;
-        let d0 = a[base]     - b[base];
+        let d0 = a[base] - b[base];
         let d1 = a[base + 1] - b[base + 1];
         let d2 = a[base + 2] - b[base + 2];
         let d3 = a[base + 3] - b[base + 3];

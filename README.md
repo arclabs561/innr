@@ -4,7 +4,10 @@
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
 [![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
-SIMD-accelerated vector similarity primitives.
+SIMD-accelerated vector similarity primitives: dot, cosine, and
+Euclidean distance over `f32` / `i8` / `u8`, plus binary, ternary,
+and scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
+with scalar fallback.
 
 ## Quickstart
 

@@ -166,14 +166,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
 
       - name: Check MSRV
         run: |
-          # Cargo.lock v4 requires newer Cargo; regenerate for MSRV toolchain.
-          # Check on aarch64 target: x86_64 AVX-512 intrinsics require Rust 1.89+
-          # but the crate compiles on 1.75 for all non-x86 targets.
+          # MSRV matches Cargo.toml `rust-version = "1.89"`. The 1.89 floor
+          # is set by AVX-512 intrinsics on x86_64; bumping in lockstep with
+          # Cargo.toml keeps the gate honest.
           rm -f Cargo.lock
           rustup target add aarch64-unknown-linux-gnu
           cargo check --target aarch64-unknown-linux-gnu

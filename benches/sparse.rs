@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![cfg_attr(not(feature = "sparse"), allow(dead_code))]
 //! Benchmarks for sparse vector operations.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -65,6 +66,7 @@ fn random_dense(dim: usize) -> Vec<f32> {
     (0..dim).map(|_| rng.random_range(-1.0f32..1.0)).collect()
 }
 
+#[cfg(feature = "sparse")]
 fn bench_sparse_ext(c: &mut Criterion) {
     use innr::sparse_ext::{sparse_dense_dot, sparse_dot as ext_sparse_dot};
 
@@ -102,5 +104,8 @@ fn bench_sparse_ext(c: &mut Criterion) {
     }
 }
 
+#[cfg(feature = "sparse")]
 criterion_group!(benches, bench_sparse_dot, bench_sparse_ext);
+#[cfg(not(feature = "sparse"))]
+criterion_group!(benches, bench_sparse_dot);
 criterion_main!(benches);

@@ -130,6 +130,12 @@ jobs:
   # Catches: aliasing violations, uninitialized memory, out-of-bounds
   miri:
     runs-on: ubuntu-latest
+    # The last three runs died at GitHub's 6h job ceiling (conclusion:
+    # cancelled, no failure signal). Proptest's default 256 cases under
+    # miri's ~100x slowdown is what ate the time; 16 cases keeps the UB
+    # check while finishing in minutes, and the explicit timeout turns
+    # any regression into a visible failure instead of a silent cancel.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -143,6 +149,7 @@ jobs:
       - name: Miri tests (safe subset)
         env:
           MIRIFLAGS: "-Zmiri-disable-isolation"
+          PROPTEST_CASES: 16
         run: |
           # Miri can't run SIMD intrinsics, so test scalar paths
           # -Zmiri-disable-isolation allows proptest to access getcwd/filesystem

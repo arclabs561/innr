@@ -1263,6 +1263,79 @@ pub unsafe fn hamming_avx512(a: &[u8], b: &[u8]) -> u32 {
     result
 }
 
+/// Integer-slot Hamming distance over `u32` slots: count of positions where
+/// `a[i] != b[i]`. AVX-512F path (16 lanes per 512-bit register).
+///
+/// # Safety
+///
+/// Caller must ensure AVX-512F is available (runtime detection).
+#[target_feature(enable = "avx512f")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u32_avx512(a: &[u32], b: &[u32]) -> u32 {
+    use std::arch::x86_64::{_mm512_cmpeq_epi32_mask, _mm512_loadu_si512};
+
+    let n = a.len().min(b.len());
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_16 = n / 16;
+    let mut diff: u32 = 0;
+
+    for i in 0..chunks_16 {
+        let base = i * 16;
+        let va = _mm512_loadu_si512(a_ptr.add(base) as *const _);
+        let vb = _mm512_loadu_si512(b_ptr.add(base) as *const _);
+        // Bit j set = lane j equal. Differing lanes = 16 - popcount(equal mask).
+        let eq_mask = _mm512_cmpeq_epi32_mask(va, vb);
+        diff += 16 - eq_mask.count_ones();
+    }
+
+    // Scalar tail
+    for i in (chunks_16 * 16)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+
+    diff
+}
+
+/// Integer-slot Hamming distance over `u32` slots. AVX2 path (8 lanes per
+/// 256-bit register).
+///
+/// # Safety
+///
+/// Caller must ensure AVX2 is available (runtime detection).
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u32_avx2(a: &[u32], b: &[u32]) -> u32 {
+    use std::arch::x86_64::{
+        _mm256_castsi256_ps, _mm256_cmpeq_epi32, _mm256_loadu_si256, _mm256_movemask_ps,
+    };
+
+    let n = a.len().min(b.len());
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_8 = n / 8;
+    let mut diff: u32 = 0;
+
+    for i in 0..chunks_8 {
+        let base = i * 8;
+        let va = _mm256_loadu_si256(a_ptr.add(base) as *const _);
+        let vb = _mm256_loadu_si256(b_ptr.add(base) as *const _);
+        // cmpeq -> 0xFFFFFFFF per equal lane; movemask_ps -> one bit per lane.
+        let cmp = _mm256_cmpeq_epi32(va, vb);
+        let eq_mask = _mm256_movemask_ps(_mm256_castsi256_ps(cmp)) as u32;
+        diff += 8 - (eq_mask & 0xFF).count_ones();
+    }
+
+    // Scalar tail
+    for i in (chunks_8 * 8)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+
+    diff
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

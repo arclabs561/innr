@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+New modules:
+- `slot`: integer-slot Hamming distance and MinHash Jaccard estimation. `slot_hamming_u32` counts differing `u32` slots with full SIMD dispatch (AVX-512F mask compare, AVX2, NEON, portable); `slot_hamming` is a generic `PartialEq` fallback for `u16`/`u64`/other widths; `minhash_jaccard` returns the standard MinHash collision-probability estimate (fraction of matching slots).
+- `distance`: generic `Distance` trait (`eval(&self, &[T], &[T]) -> f32`, smaller = closer) with zero-sized metric types `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32`. Mirrors the `anndists` / `hnsw_rs` convention so innr's metrics can back a generic index.
+
+These are additive; no breaking changes. Motivated by a request to support integer Hamming for MinHash collision estimation and a generic distance trait for use as a pluggable backend (issue #1).
+
 ## 0.2.0
 
 New modules:

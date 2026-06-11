@@ -11,11 +11,16 @@
 //! `hnsw_rs` (`eval(&self, &[T], &[T]) -> f32`, smaller = closer).
 //!
 //! This is innr's *own* trait, not a re-export. `hnsw_rs` binds specifically to
-//! `anndists::dist::distances::Distance` (it does `pub use anndists`), so these
-//! metric types are not automatically usable as `hnsw_rs` distances: a thin
-//! adapter that implements `anndists`'s trait for them would be required, and is
-//! deliberately left out of the dependency-free core. Use this trait for
-//! parameterizing innr's own generic code over a metric.
+//! `anndists::dist::distances::Distance` (it does `pub use anndists`), so by
+//! default these metric types are not usable as `hnsw_rs` distances. The
+//! optional `anndists` feature closes that gap: it implements anndists's
+//! `Distance` trait for every metric type in this module, making them drop-in
+//! `hnsw_rs` distances while the default build stays dependency-free.
+//!
+//! With the feature enabled, both traits define an `eval` method with the same
+//! signature. Calls stay unambiguous as long as only one trait is in scope; if
+//! you import both, disambiguate with fully qualified syntax
+//! (`<DistSlotU32 as innr::distance::Distance<u32>>::eval(...)`).
 //!
 //! # Convention
 //!
@@ -134,6 +139,56 @@ impl Distance<u32> for DistSlotU32 {
     #[inline]
     fn eval(&self, a: &[u32], b: &[u32]) -> f32 {
         jaccard_distance(a, b)
+    }
+}
+
+// Adapter impls for the `anndists` ecosystem (`hnsw_rs` binds to
+// anndists::dist::Distance, not to a structurally similar trait). Each impl
+// delegates to the innr trait above so the two can never drift.
+#[cfg(feature = "anndists")]
+mod anndists_impls {
+    use super::*;
+
+    impl anndists::dist::Distance<f32> for DistCosine {
+        #[inline]
+        fn eval(&self, a: &[f32], b: &[f32]) -> f32 {
+            Distance::eval(self, a, b)
+        }
+    }
+
+    impl anndists::dist::Distance<f32> for DistDot {
+        #[inline]
+        fn eval(&self, a: &[f32], b: &[f32]) -> f32 {
+            Distance::eval(self, a, b)
+        }
+    }
+
+    impl anndists::dist::Distance<f32> for DistL2 {
+        #[inline]
+        fn eval(&self, a: &[f32], b: &[f32]) -> f32 {
+            Distance::eval(self, a, b)
+        }
+    }
+
+    impl anndists::dist::Distance<f32> for DistL1 {
+        #[inline]
+        fn eval(&self, a: &[f32], b: &[f32]) -> f32 {
+            Distance::eval(self, a, b)
+        }
+    }
+
+    impl anndists::dist::Distance<u8> for DistHamming {
+        #[inline]
+        fn eval(&self, a: &[u8], b: &[u8]) -> f32 {
+            Distance::eval(self, a, b)
+        }
+    }
+
+    impl anndists::dist::Distance<u32> for DistSlotU32 {
+        #[inline]
+        fn eval(&self, a: &[u32], b: &[u32]) -> f32 {
+            Distance::eval(self, a, b)
+        }
     }
 }
 

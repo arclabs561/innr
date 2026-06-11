@@ -8,8 +8,14 @@
 //! the metric instead of hard-coding one.
 //!
 //! The trait shape intentionally mirrors the convention used by `anndists` /
-//! `hnsw_rs` (`eval(&self, &[T], &[T]) -> f32`, smaller = closer) so innr's
-//! metrics drop into code already written against that ecosystem.
+//! `hnsw_rs` (`eval(&self, &[T], &[T]) -> f32`, smaller = closer).
+//!
+//! This is innr's *own* trait, not a re-export. `hnsw_rs` binds specifically to
+//! `anndists::dist::distances::Distance` (it does `pub use anndists`), so these
+//! metric types are not automatically usable as `hnsw_rs` distances: a thin
+//! adapter that implements `anndists`'s trait for them would be required, and is
+//! deliberately left out of the dependency-free core. Use this trait for
+//! parameterizing innr's own generic code over a metric.
 //!
 //! # Convention
 //!
@@ -20,7 +26,7 @@
 //! - [`DistDot`](crate::distance::DistDot) returns `-dot` so that larger dot products sort first.
 //! - [`DistL2`](crate::distance::DistL2), [`DistL1`](crate::distance::DistL1) are already distances.
 //! - [`DistHamming`](crate::distance::DistHamming) returns the bit-Hamming distance as `f32`.
-//! - [`DistSlotU32`](crate::distance::DistSlotU32) returns the integer-slot Hamming distance as `f32`.
+//! - [`DistSlotU32`](crate::distance::DistSlotU32) returns the normalized integer-slot Hamming distance (fraction of differing slots).
 //!
 //! # Example
 //!
@@ -45,7 +51,7 @@
 //! assert_eq!(nearest(&DistL2, &[0.9, 0.9], &corpus), 2);
 //! ```
 
-use crate::{cosine, dot, hamming_distance, l1_distance, l2_distance, slot::slot_hamming_u32};
+use crate::{cosine, dot, hamming_distance, l1_distance, l2_distance, slot::jaccard_distance};
 
 /// A distance metric over slices of `T`. `eval` returns a distance: smaller is
 /// more similar.
@@ -114,15 +120,20 @@ impl Distance<u8> for DistHamming {
     }
 }
 
-/// Integer-slot Hamming distance over `u32` slots (see
-/// [`crate::slot_hamming_u32`]). The natural metric for MinHash sketches.
+/// Normalized integer-slot Hamming distance over `u32` slots: the fraction of
+/// differing slots (see [`crate::jaccard_distance`]). The natural metric for
+/// MinHash sketches.
+///
+/// Returns `differing / len` rather than the raw count, matching the value the
+/// `anndists` integer `DistHamming` produces, so an index built on this metric
+/// sees the same distance scale as that ecosystem.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DistSlotU32;
 
 impl Distance<u32> for DistSlotU32 {
     #[inline]
     fn eval(&self, a: &[u32], b: &[u32]) -> f32 {
-        slot_hamming_u32(a, b) as f32
+        jaccard_distance(a, b)
     }
 }
 
@@ -169,10 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn slot_distance_counts_differing_slots() {
+    fn slot_distance_is_normalized_differing_fraction() {
         let a = [1u32, 2, 3, 4];
         let b = [1u32, 0, 3, 9];
-        assert_eq!(DistSlotU32.eval(&a, &b), 2.0);
+        // 2 of 4 slots differ -> 0.5
+        assert_eq!(DistSlotU32.eval(&a, &b), 0.5);
     }
 
     // A generic consumer compiles and runs against any Distance impl.

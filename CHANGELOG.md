@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+Refinements to the 0.5.0 slot/distance surface, grounded in how the
+`anndists` / `hnsw_rs` ecosystem actually consumes these metrics:
+
+- Added `jaccard_distance`: the fraction of differing slots (`1 - minhash_jaccard`), matching the value `anndists`'s integer `DistHamming` returns. `minhash_jaccard` is a similarity (larger is closer); `jaccard_distance` is the distance form indexes expect.
+- `DistSlotU32::eval` now returns the normalized differing fraction (`jaccard_distance`) instead of the raw differing count, so an index built on it sees the same distance scale as the `anndists` ecosystem. Ordering is unchanged.
+- Corrected the `distance` module docs: innr's `Distance` is its own trait, not a drop-in for `hnsw_rs` (which binds to `anndists::dist::distances::Distance`). Using innr's metrics in an `hnsw_rs` index needs an adapter implementing that trait, deliberately kept out of the dependency-free core.
+
 ## 0.5.0
 
 New modules:

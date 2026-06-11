@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0
+
+- New optional `anndists` feature: implements `anndists::dist::Distance` for `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, and `DistSlotU32`, making innr's metrics drop-in distances for `hnsw_rs` (which binds to anndists's trait). The impls delegate to innr's own `Distance` trait so the two cannot drift. Verified end-to-end in `tests/anndists_interop.rs` by building real `hnsw_rs` indexes (u32 MinHash sketches with `DistSlotU32`, f32 embeddings with `DistCosine`). Closes the adapter gap documented in 0.5.1 (issue #1).
+- The default build remains dependency-free; the feature pulls in `anndists 0.1.5` only when enabled.
+
 ## 0.5.1
 
 Refinements to the 0.5.0 slot/distance surface, grounded in how the

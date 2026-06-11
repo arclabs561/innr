@@ -67,6 +67,22 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Late interaction**: `maxsim`, `maxsim_cosine` (ColBERT-style), `sparse_maxsim` (sparse late interaction).
 
+**Integer-slot Hamming / MinHash**: `slot_hamming_u32` (SIMD-dispatched differing-slot count), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form).
+
+**Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
+
+```toml
+innr = { version = "0.6", features = ["anndists"] }
+```
+
+```rust
+use hnsw_rs::prelude::Hnsw;
+use innr::distance::DistSlotU32;
+
+// HNSW over u32 MinHash sketches, innr's slot Hamming as the metric.
+let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
+```
+
 ## SIMD Dispatch
 
 | Architecture | Instructions | Detection |

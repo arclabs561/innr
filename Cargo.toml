@@ -1,6 +1,6 @@
 [package]
 name = "innr"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 rust-version = "1.89"
@@ -26,15 +26,23 @@ include = [
 [features]
 default = []
 sparse = []
+# Implements anndists::dist::Distance for the metric types in `distance`,
+# making them usable directly as hnsw_rs distances (hnsw_rs binds to
+# anndists's trait). Off by default to keep the core dependency-free.
+anndists = ["dep:anndists"]
 
 [dependencies]
-# No dependencies for core operations - just std
+# No dependencies for core operations - just std.
+# anndists is opt-in interop; see the `anndists` feature above.
+anndists = { version = "0.1.5", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.5"
 qntz = { version = "0.1", features = ["rabitq"] }
 rand = "0.9"
+# Proves the anndists feature against the real consumer (tests/anndists_interop.rs).
+hnsw_rs = "0.3"
 
 [[example]]
 name = "maxsim_colbert"

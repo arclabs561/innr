@@ -2,6 +2,12 @@
 #
 # Run: cargo deny check
 
+# Only scan what ships to users. Dev-dependencies (criterion, proptest,
+# hnsw_rs for the anndists interop test) stay out of advisory/license gating;
+# they never appear in a consumer's tree.
+[graph]
+exclude-dev = true
+
 [advisories]
 ignore = []
 

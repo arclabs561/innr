@@ -19,6 +19,16 @@
 //! sometimes called "integer Hamming" or, confusingly, "Jaccard" in other
 //! libraries.
 //!
+//! # Similarity vs distance
+//!
+//! Be deliberate about direction. [`minhash_jaccard`] returns a *similarity*
+//! (fraction of matching slots, larger is closer); [`jaccard_distance`] returns
+//! a *distance* (fraction of differing slots, smaller is closer). Index
+//! libraries in the `anndists` / `hnsw_rs` ecosystem index on the distance form,
+//! so use [`jaccard_distance`] when interoperating with them. [`slot_hamming`]
+//! and [`slot_hamming_u32`] return the raw differing-slot *count*, not a
+//! normalized fraction.
+//!
 //! # Dispatch
 //!
 //! [`slot_hamming_u32`] uses the same runtime-dispatch pattern as the rest of
@@ -184,6 +194,48 @@ pub fn minhash_jaccard(a: &[u32], b: &[u32]) -> f32 {
     matches as f32 / len as f32
 }
 
+/// MinHash Jaccard *distance* between two `u32` sketches: the fraction of
+/// differing slots, `slot_hamming_u32(a, b) / len`, i.e. `1 - minhash_jaccard`.
+///
+/// This is the complement of [`minhash_jaccard`] and the form most index
+/// libraries expect (smaller is closer). It matches the value `anndists`
+/// returns from its integer `DistHamming` (normalized differing count), so use
+/// this when porting from or interoperating with that ecosystem; use
+/// [`minhash_jaccard`] when you want a similarity in `[0, 1]`.
+///
+/// Returns `0.0` for two empty sketches (vacuously identical, distance 0).
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
+///
+/// # Example
+///
+/// ```rust
+/// use innr::jaccard_distance;
+///
+/// let a = [1u32, 2, 3, 4];
+/// let b = [1u32, 2, 3, 9];
+/// // 1 of 4 slots differs -> 0.25
+/// assert_eq!(jaccard_distance(&a, &b), 0.25);
+/// ```
+#[inline]
+#[must_use]
+pub fn jaccard_distance(a: &[u32], b: &[u32]) -> f32 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::jaccard_distance: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    let len = a.len();
+    if len == 0 {
+        return 0.0;
+    }
+    slot_hamming_u32(a, b) as f32 / len as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +346,31 @@ mod tests {
     #[test]
     fn test_minhash_jaccard_empty() {
         assert_eq!(minhash_jaccard(&[], &[]), 1.0);
+    }
+
+    #[test]
+    fn test_jaccard_distance_basic() {
+        let a = [1u32, 2, 3, 4];
+        let b = [1u32, 2, 3, 9];
+        assert_eq!(jaccard_distance(&a, &b), 0.25);
+    }
+
+    #[test]
+    fn test_jaccard_distance_complements_similarity() {
+        let a = [1u32, 5, 9, 2, 6, 10, 3, 7];
+        let b = [1u32, 0, 9, 0, 6, 0, 3, 0];
+        assert_eq!(jaccard_distance(&a, &b), 1.0 - minhash_jaccard(&a, &b));
+    }
+
+    #[test]
+    fn test_jaccard_distance_identical() {
+        let v = [5u32, 6, 7, 8];
+        assert_eq!(jaccard_distance(&v, &v), 0.0);
+    }
+
+    #[test]
+    fn test_jaccard_distance_empty() {
+        assert_eq!(jaccard_distance(&[], &[]), 0.0);
     }
 }
 

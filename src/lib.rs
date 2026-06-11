@@ -13,6 +13,8 @@
 //! | **Sparse vectors** | [`sparse_dot`] | BM25 scores, SPLADE |
 //! | **INT8 embeddings** | [`dot_u8`] | Quantized vector search |
 //! | **Binary embeddings** | [`hamming_distance`] | Byte-packed bit vectors |
+//! | **MinHash sketches** | [`slot_hamming_u32`] / [`minhash_jaccard`] | Integer-slot match counting |
+//! | **Generic metric backend** | [`distance::Distance`] | Plug innr into a generic index |
 //!
 //! # SIMD Dispatch
 //!
@@ -118,6 +120,13 @@ pub mod scalar;
 /// Integer quantization primitives: u8 dot product and Hamming distance.
 pub mod quant;
 
+/// Integer-slot Hamming distance and MinHash Jaccard estimation.
+pub mod slot;
+
+/// Generic [`Distance`](distance::Distance) trait for using innr's metrics as a
+/// pluggable backend for generic indexes.
+pub mod distance;
+
 /// Fixed-capacity top-K nearest neighbor tracker for ANN inner-loop use.
 pub mod topk;
 
@@ -126,6 +135,8 @@ pub use sparse::{sparse_dot, sparse_maxsim};
 pub use maxsim::{maxsim, maxsim_cosine};
 
 pub use quant::{dot_u8, hamming_distance};
+
+pub use slot::{minhash_jaccard, slot_hamming, slot_hamming_u32};
 
 pub use topk::TopK;
 

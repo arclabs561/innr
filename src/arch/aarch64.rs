@@ -592,6 +592,45 @@ pub unsafe fn hamming_neon(a: &[u8], b: &[u8]) -> u32 {
     result
 }
 
+/// Integer-slot Hamming distance over `u32` slots: count of positions where
+/// `a[i] != b[i]`. NEON path (4 lanes per 128-bit register).
+///
+/// # Safety
+///
+/// NEON is always available on aarch64; the `unsafe` is for the intrinsic
+/// calls and unchecked tail indexing.
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u32_neon(a: &[u32], b: &[u32]) -> u32 {
+    use std::arch::aarch64::{vaddvq_u32, vceqq_u32, vld1q_u32, vshrq_n_u32};
+
+    let n = a.len().min(b.len());
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+
+    let chunks_4 = n / 4;
+    let mut equal: u32 = 0;
+
+    for i in 0..chunks_4 {
+        let base = i * 4;
+        let va = vld1q_u32(a_ptr.add(base));
+        let vb = vld1q_u32(b_ptr.add(base));
+        // vceqq_u32 -> 0xFFFFFFFF per equal lane; shift right 31 -> 1 per equal
+        // lane; horizontal add -> equal-lane count for this chunk.
+        let cmp = vceqq_u32(va, vb);
+        equal += vaddvq_u32(vshrq_n_u32(cmp, 31));
+    }
+
+    let simd_slots = (chunks_4 * 4) as u32;
+    let mut diff = simd_slots - equal;
+
+    // Scalar tail
+    for i in (chunks_4 * 4)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+
+    diff
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

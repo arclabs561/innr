@@ -128,6 +128,37 @@ jobs:
       - name: SIMD correctness (NEON)
         run: cargo test simd_correctness --all-features
 
+  # Linux ARM native (Cobalt 100 / Neoverse N2, Armv9). Free for public
+  # repos; real aarch64 silicon distinct from macOS NEON and from QEMU. Do
+  # NOT pin target-cpu: GitHub sometimes schedules N1 (no SVE2), so rely on
+  # innr's runtime detection.
+  test-arm-linux:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (Linux ARM native)
+        run: cargo test --all-features
+
+  # Coverage: confirm every dispatch arm actually executes (the <threshold
+  # portable fallback, AVX2, NEON), not just that lines were touched. Summary
+  # only -- no external upload, so no token needed.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Coverage summary
+        run: cargo llvm-cov --all-features --summary-only
+
   # Cross-compilation check (build only, no execution)
   cross-compile:
     runs-on: ubuntu-latest

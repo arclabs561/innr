@@ -99,10 +99,8 @@ impl TopK {
             self.insert_sorted(id, distance);
             self.count += 1;
         } else if distance.total_cmp(&self.distances[0]) == std::cmp::Ordering::Less {
-            // total_cmp, not <: with a NaN sitting at the worst slot, any
-            // numeric candidate must still be accepted (NaN compares greater
-            // than every number in the total order), otherwise one NaN
-            // insertion poisons the gate and rejects all later candidates.
+            // total_cmp, not <: NaN sorts greatest, so a NaN in the worst slot
+            // still admits numeric candidates instead of poisoning the gate.
             // Better than current worst: evict index 0 and re-insert.
             // Remove slot 0 (worst) by shifting left, then insert at the
             // correct sorted position. copy_within -> memmove (SIMD).
@@ -192,9 +190,7 @@ impl TopK {
 mod tests {
     #[test]
     fn nan_candidate_does_not_poison_topk() {
-        // Regression: partial_cmp().unwrap_or(Equal) made NaN insertion
-        // order-dependent; a NaN landing at the boundary could poison
-        // threshold() so every later candidate was rejected.
+        // Regression: unwrap_or(Equal) let one NaN poison threshold() and reject all later.
         let mut tk = super::TopK::new(2);
         tk.insert(0, f32::NAN);
         tk.insert(1, 1.0);

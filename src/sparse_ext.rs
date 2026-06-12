@@ -69,11 +69,8 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
 
     let dense_len = dense.len();
 
-    // Fast path: if the largest dimension in the sparse vector fits in dense,
-    // no per-element bounds check is needed. The maximum is computed over all
-    // entries rather than trusting the sorted-input convention: this function
-    // is safe to call, so an unsorted input must not be able to reach the
-    // unchecked indexing below.
+    // True max over all entries, not last(): this is a safe fn, so unsorted
+    // input must not reach the unchecked indexing below.
     let max_dim = sparse.iter().map(|&(d, _)| d).max().unwrap() as usize;
 
     if max_dim < dense_len {
@@ -191,9 +188,8 @@ pub fn sparse_max_weight(v: &[(u32, f32)]) -> f32 {
 mod tests {
     #[test]
     fn unsorted_sparse_input_is_safe_and_correct() {
-        // Regression: the fast path took last() as the max dimension, which
-        // is only valid for sorted input; this unsorted input previously
-        // reached out-of-bounds unchecked indexing from safe code.
+        // Regression: fast path took last() as max, sound only for sorted input;
+        // unsorted reached out-of-bounds unchecked indexing from safe code.
         let sparse = [(10u32, 1.0f32), (0u32, 2.0f32)];
         let dense = [3.0f32];
         // dim 10 is out of bounds for dense: slow path must skip it.

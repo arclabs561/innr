@@ -492,9 +492,8 @@ pub(crate) mod aarch64 {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
-    // Assert up front so panic behavior does not depend on input size:
-    // previously short inputs reached fast_cosine's assert while SIMD-sized
-    // inputs silently truncated to the shorter length.
+    // Assert up front so panic does not depend on size (short inputs hit
+    // fast_cosine's assert; SIMD-sized inputs truncated silently).
     assert_eq!(
         a.len(),
         b.len(),
@@ -533,9 +532,7 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
 mod tests {
     #[test]
     fn small_norm_vectors_not_zeroed() {
-        // Regression: the zero-norm guard compared SQUARED norms against the
-        // unsquared epsilon, returning 0.0 for any vector with norm below
-        // ~3.2e-5 while `cosine` returned the correct value.
+        // Regression: squared-norm guard vs unsquared epsilon zeroed any norm < ~3.2e-5.
         let a = [1e-6_f32, 2e-6, 3e-6, 4e-6, 5e-6, 6e-6, 7e-6, 8e-6];
         let b = a;
         let fast = super::fast_cosine(&a, &b);
@@ -553,8 +550,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "slice length mismatch")]
     fn dispatch_length_mismatch_panics_for_simd_sizes() {
-        // Regression: panic behavior must not depend on input size; SIMD-sized
-        // mismatches previously truncated silently.
+        // Regression: panic must not depend on size (SIMD-sized mismatches truncated silently).
         let a = vec![1.0_f32; 64];
         let b = vec![1.0_f32; 63];
         let _ = super::fast_cosine_dispatch(&a, &b);

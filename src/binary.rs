@@ -57,9 +57,7 @@ impl PackedBinary {
             dimension.div_ceil(64)
         );
         let mut data = data;
-        // Mask padding bits past `dimension` in the last word: distance ops
-        // popcount whole words, so stray bits would otherwise count as
-        // phantom dimensions (violating hamming <= dimension).
+        // Mask padding past `dimension`: distance ops popcount whole words.
         let rem = dimension % 64;
         if rem != 0 {
             if let Some(last) = data.last_mut() {
@@ -218,8 +216,7 @@ pub fn binary_jaccard(a: &PackedBinary, b: &PackedBinary) -> f32 {
 mod tests {
     #[test]
     fn new_masks_padding_bits() {
-        // Regression: distance ops popcount whole words, so unmasked padding
-        // bits past `dimension` counted as phantom dimensions.
+        // Regression: unmasked padding bits past dimension counted as phantom dims.
         let dirty = super::PackedBinary::new(vec![u64::MAX], 8);
         let zeros = super::PackedBinary::new(vec![0], 8);
         let h = super::binary_hamming(&dirty, &zeros);

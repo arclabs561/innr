@@ -1,23 +1,15 @@
 //! SIMD backend introspection: which kernel family will actually run.
 //!
-//! The dispatchers in this crate select a kernel per call from runtime CPU
-//! feature detection and the input length. That selection is invisible to
-//! callers, which makes two situations needlessly hard: performance work
-//! ("am I on the AVX-512 path or did my vectors fall under the dispatch
-//! threshold?") and bug reports ("which kernel computed this?"). The
-//! functions here answer those questions without the caller re-deriving
-//! the dispatch rules.
+//! Dispatch is per-call from CPU detection plus input length, and invisible
+//! to callers. These functions report the choice so perf work and bug
+//! reports don't have to re-derive it.
 //!
 //! ```
 //! use innr::backend::{dense_backend, Backend};
 //!
-//! // A 768-dim embedding: SIMD on any supported machine.
-//! let b = dense_backend(768);
-//! assert_ne!(b, Backend::Portable, "768 dims should dispatch to SIMD \
-//!     on x86_64 and aarch64; got {b}");
-//!
-//! // 8 dims is below every dense threshold: always portable.
-//! assert_eq!(dense_backend(8), Backend::Portable);
+//! let b = dense_backend(768);  // SIMD on any supported machine
+//! assert_ne!(b, Backend::Portable, "768 dims should dispatch to SIMD, got {b}");
+//! assert_eq!(dense_backend(8), Backend::Portable);  // below every dense threshold
 //! ```
 
 use core::fmt;

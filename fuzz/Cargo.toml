@@ -1,0 +1,40 @@
+[package]
+name = "innr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Detach from innr's empty [workspace], which would otherwise auto-absorb
+# this crate (innr is a standalone repo, not a workspace root for fuzz).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.innr]
+path = ".."
+features = ["sparse"]
+
+[[bin]]
+name = "dot_diff"
+path = "fuzz_targets/dot_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "l2_l1_diff"
+path = "fuzz_targets/l2_l1_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "slot_diff"
+path = "fuzz_targets/slot_diff.rs"
+test = false
+doc = false
+bench = false

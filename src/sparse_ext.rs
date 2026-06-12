@@ -70,9 +70,11 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
     let dense_len = dense.len();
 
     // Fast path: if the largest dimension in the sparse vector fits in dense,
-    // no per-element bounds check is needed.
-    // SAFETY: sparse is non-empty (checked above), so last() is always Some.
-    let max_dim = unsafe { sparse.last().unwrap_unchecked() }.0 as usize;
+    // no per-element bounds check is needed. The maximum is computed over all
+    // entries rather than trusting the sorted-input convention: this function
+    // is safe to call, so an unsorted input must not be able to reach the
+    // unchecked indexing below.
+    let max_dim = sparse.iter().map(|&(d, _)| d).max().unwrap() as usize;
 
     if max_dim < dense_len {
         // All indices are in-bounds: skip the filter, use unsafe indexing.
@@ -89,7 +91,8 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
             let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
             let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
             let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
-            // SAFETY: max_dim < dense_len and all dims <= max_dim (sorted input).
+            // SAFETY: max_dim is the true maximum over all entries and
+            // max_dim < dense_len, so every dim indexes in-bounds.
             s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
             s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
             s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
@@ -186,6 +189,22 @@ pub fn sparse_max_weight(v: &[(u32, f32)]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unsorted_sparse_input_is_safe_and_correct() {
+        // Regression: the fast path took last() as the max dimension, which
+        // is only valid for sorted input; this unsorted input previously
+        // reached out-of-bounds unchecked indexing from safe code.
+        let sparse = [(10u32, 1.0f32), (0u32, 2.0f32)];
+        let dense = [3.0f32];
+        // dim 10 is out of bounds for dense: slow path must skip it.
+        assert_eq!(super::sparse_dense_dot(&sparse, &dense), 6.0);
+
+        // Unsorted but fully in-bounds: fast path must compute the true max.
+        let sparse = [(3u32, 1.0f32), (0u32, 2.0f32)];
+        let dense = [1.0f32, 0.0, 0.0, 4.0];
+        assert_eq!(super::sparse_dense_dot(&sparse, &dense), 6.0);
+    }
+
     use super::*;
 
     #[test]

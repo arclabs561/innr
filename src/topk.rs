@@ -98,7 +98,11 @@ impl TopK {
             // Buffer not yet full: always insert.
             self.insert_sorted(id, distance);
             self.count += 1;
-        } else if distance < self.distances[0] {
+        } else if distance.total_cmp(&self.distances[0]) == std::cmp::Ordering::Less {
+            // total_cmp, not <: with a NaN sitting at the worst slot, any
+            // numeric candidate must still be accepted (NaN compares greater
+            // than every number in the total order), otherwise one NaN
+            // insertion poisons the gate and rejects all later candidates.
             // Better than current worst: evict index 0 and re-insert.
             // Remove slot 0 (worst) by shifting left, then insert at the
             // correct sorted position. copy_within -> memmove (SIMD).
@@ -174,9 +178,10 @@ impl TopK {
         let slice = &self.distances[..len];
         match slice.binary_search_by(|&d| {
             // Reverse the standard ordering: treat descending as ascending.
-            d.partial_cmp(&distance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .reverse()
+            // total_cmp gives NaN a defined position (greater than all
+            // numbers), so a NaN candidate cannot corrupt the sort order or
+            // poison threshold() for later candidates.
+            d.total_cmp(&distance).reverse()
         }) {
             Ok(i) | Err(i) => i,
         }
@@ -185,6 +190,27 @@ impl TopK {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nan_candidate_does_not_poison_topk() {
+        // Regression: partial_cmp().unwrap_or(Equal) made NaN insertion
+        // order-dependent; a NaN landing at the boundary could poison
+        // threshold() so every later candidate was rejected.
+        let mut tk = super::TopK::new(2);
+        tk.insert(0, f32::NAN);
+        tk.insert(1, 1.0);
+        tk.insert(2, 0.5);
+        let items = tk.into_sorted();
+        let ids: Vec<u32> = items.iter().map(|&(i, _)| i).collect();
+        assert!(
+            ids.contains(&2),
+            "best candidate must survive a NaN: {ids:?}"
+        );
+        assert!(
+            ids.contains(&1),
+            "second candidate must survive a NaN: {ids:?}"
+        );
+    }
+
     use super::*;
 
     #[test]

@@ -23,7 +23,7 @@
 //! - SimSIMD (Vardanian 2023): demonstrates 3-10x speedups with rsqrt+NR
 //! - Quake III "fast inverse square root" (Lomont 2003): classic integer bit-hack analysis
 
-use crate::NORM_EPSILON;
+use crate::NORM_EPSILON_SQ;
 
 // MIN_DIM_SIMD is only used on architectures with SIMD dispatch
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -116,7 +116,7 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
 
     // Use rsqrt to avoid sqrt and division
     // cosine = ab / sqrt(aa * bb) = ab * rsqrt(aa) * rsqrt(bb)
-    if aa > NORM_EPSILON && bb > NORM_EPSILON {
+    if aa > NORM_EPSILON_SQ && bb > NORM_EPSILON_SQ {
         ab * fast_rsqrt(aa) * fast_rsqrt(bb)
     } else {
         0.0
@@ -203,7 +203,7 @@ pub(crate) mod x86_64 {
         }
 
         // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
-        if aa > super::NORM_EPSILON && bb > super::NORM_EPSILON {
+        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
             // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
             let vals = _mm_set_ps(1.0, 1.0, bb, aa);
             // Initial ~12-bit rsqrt estimate
@@ -293,7 +293,7 @@ pub(crate) mod x86_64 {
         }
 
         // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
-        if aa > super::NORM_EPSILON && bb > super::NORM_EPSILON {
+        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
             // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
             let vals = _mm_set_ps(1.0, 1.0, bb, aa);
             // Initial ~12-bit rsqrt estimate
@@ -427,7 +427,7 @@ pub(crate) mod aarch64 {
             bb += bi * bi;
         }
 
-        if aa > super::NORM_EPSILON && bb > super::NORM_EPSILON {
+        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
             // NEON hardware rsqrt: vrsqrte + two Newton-Raphson iterations via vrsqrts.
             // Pack aa and bb into a float32x2_t, compute rsqrt in-register,
             // then extract and multiply. This avoids scalar/SIMD transitions.
@@ -492,8 +492,18 @@ pub(crate) mod aarch64 {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
+    // Assert up front so panic behavior does not depend on input size:
+    // previously short inputs reached fast_cosine's assert while SIMD-sized
+    // inputs silently truncated to the shorter length.
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::fast_cosine_dispatch: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let n = a.len().min(b.len());
+    let n = a.len();
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -521,6 +531,35 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn small_norm_vectors_not_zeroed() {
+        // Regression: the zero-norm guard compared SQUARED norms against the
+        // unsquared epsilon, returning 0.0 for any vector with norm below
+        // ~3.2e-5 while `cosine` returned the correct value.
+        let a = [1e-6_f32, 2e-6, 3e-6, 4e-6, 5e-6, 6e-6, 7e-6, 8e-6];
+        let b = a;
+        let fast = super::fast_cosine(&a, &b);
+        let exact = crate::cosine(&a, &b);
+        assert!(
+            (fast - exact).abs() < 0.02,
+            "fast {fast} vs exact {exact}: small-norm vectors must not collapse to 0"
+        );
+        assert!(
+            fast > 0.9,
+            "parallel small-norm vectors should be ~1.0, got {fast}"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "slice length mismatch")]
+    fn dispatch_length_mismatch_panics_for_simd_sizes() {
+        // Regression: panic behavior must not depend on input size; SIMD-sized
+        // mismatches previously truncated silently.
+        let a = vec![1.0_f32; 64];
+        let b = vec![1.0_f32; 63];
+        let _ = super::fast_cosine_dispatch(&a, &b);
+    }
+
     use super::*;
 
     #[test]

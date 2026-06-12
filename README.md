@@ -49,7 +49,11 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 ## Operations
 
-**Core**: `dot`, `cosine`, `norm`, `l2_distance`, `l2_distance_squared`, `l1_distance`, `angular_distance`, `normalize`. Portable fallbacks in `innr::dense` (e.g. `dot_portable`).
+**Core (f32)**: `dot`, `cosine`, `norm`, `l2_distance`, `l2_distance_squared`, `l1_distance`, `angular_distance`, `normalize`, `normalize_with_norm` (normalize in place, returns the original norm). Portable fallbacks in `innr::dense` (e.g. `dot_portable`).
+
+**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}` -- SIMD-dispatched (AVX-512/AVX2/NEON) with exact FMA accumulation, for iterative-solver residuals and statistical reductions.
+
+**Backend introspection**: `innr::backend::{dense_backend, slot_backend}` report which kernel family (`Avx512` / `Avx2Fma` / `Neon` / `Portable`) a given length dispatches to on this machine.
 
 **Matryoshka**: `matryoshka_dot`, `matryoshka_cosine` -- similarity on a prefix of the embedding.
 
@@ -67,7 +71,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Late interaction**: `maxsim`, `maxsim_cosine` (ColBERT-style), `sparse_maxsim` (sparse late interaction).
 
-**Integer-slot Hamming / MinHash**: `slot_hamming_u32` (SIMD-dispatched differing-slot count), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form).
+**Integer-slot Hamming / MinHash**: `slot_hamming_u32` and `slot_hamming_u64` (SIMD-dispatched differing-slot count; the u64 path suits probminhash-style 64-bit sketches), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form).
 
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 
@@ -99,6 +103,8 @@ Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantiz
 ![Benchmark throughput](docs/bench_throughput.png)
 
 *Apple Silicon (NEON). Run `cargo bench` to reproduce on your hardware.*
+
+The f64 reductions reach ~8.5 Gelem/s and `slot_hamming_u64` ~5.6 Gelem/s on Apple silicon (NEON), measured cache-resident and single-core; cold-load streaming throughput is lower. AVX-512 paths are executed and differential-tested in CI under Intel SDE.
 
 For maximum performance, build with native CPU features:
 

@@ -153,7 +153,9 @@ pub use maxsim::{maxsim, maxsim_cosine};
 
 pub use quant::{dot_u8, hamming_distance};
 
-pub use slot::{jaccard_distance, minhash_jaccard, slot_hamming, slot_hamming_u32};
+pub use slot::{
+    jaccard_distance, minhash_jaccard, slot_hamming, slot_hamming_u32, slot_hamming_u64,
+};
 
 pub use topk::TopK;
 

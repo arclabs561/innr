@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
+  # Registry downloads flake intermittently (observed: winapi via the
+  # cpu-time dev-dep); retry instead of producing a false red.
+  CARGO_NET_RETRY: "10"
 
 # SIMD Testing Strategy (grounded in Cryspen's approach):
 # 1. Native hardware tests (x86 + ARM) for real SIMD execution

@@ -631,6 +631,145 @@ pub unsafe fn slot_hamming_u32_neon(a: &[u32], b: &[u32]) -> u32 {
     diff
 }
 
+// ---------------------------------------------------------------------------
+// f64 reductions (2 doubles per q-register). Mirror the f32 kernels one width
+// down; 4-way unrolled = 8 doubles per iteration.
+// ---------------------------------------------------------------------------
+
+/// Dot product over f64. NEON is baseline on aarch64.
+#[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
+pub unsafe fn dot_f64_neon(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::aarch64::{float64x2_t, vaddvq_f64, vdupq_n_f64, vfmaq_f64, vld1q_f64};
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks8 = n / 8;
+    let mut s0: float64x2_t = vdupq_n_f64(0.0);
+    let mut s1: float64x2_t = vdupq_n_f64(0.0);
+    let mut s2: float64x2_t = vdupq_n_f64(0.0);
+    let mut s3: float64x2_t = vdupq_n_f64(0.0);
+    for i in 0..chunks8 {
+        let base = i * 8;
+        s0 = vfmaq_f64(s0, vld1q_f64(ap.add(base)), vld1q_f64(bp.add(base)));
+        s1 = vfmaq_f64(s1, vld1q_f64(ap.add(base + 2)), vld1q_f64(bp.add(base + 2)));
+        s2 = vfmaq_f64(s2, vld1q_f64(ap.add(base + 4)), vld1q_f64(bp.add(base + 4)));
+        s3 = vfmaq_f64(s3, vld1q_f64(ap.add(base + 6)), vld1q_f64(bp.add(base + 6)));
+    }
+    let mut result = vaddvq_f64(s0) + vaddvq_f64(s1) + vaddvq_f64(s2) + vaddvq_f64(s3);
+    let mut i = chunks8 * 8;
+    while i + 2 <= n {
+        result += vaddvq_f64(vfmaq_f64(
+            vdupq_n_f64(0.0),
+            vld1q_f64(ap.add(i)),
+            vld1q_f64(bp.add(i)),
+        ));
+        i += 2;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len), valid index in both.
+        result += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
+    result
+}
+
+/// Squared L2 distance over f64.
+#[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
+pub unsafe fn l2_squared_f64_neon(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::aarch64::{
+        float64x2_t, vaddvq_f64, vdupq_n_f64, vfmaq_f64, vld1q_f64, vsubq_f64,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks8 = n / 8;
+    let mut s0: float64x2_t = vdupq_n_f64(0.0);
+    let mut s1: float64x2_t = vdupq_n_f64(0.0);
+    let mut s2: float64x2_t = vdupq_n_f64(0.0);
+    let mut s3: float64x2_t = vdupq_n_f64(0.0);
+    for i in 0..chunks8 {
+        let base = i * 8;
+        let d0 = vsubq_f64(vld1q_f64(ap.add(base)), vld1q_f64(bp.add(base)));
+        let d1 = vsubq_f64(vld1q_f64(ap.add(base + 2)), vld1q_f64(bp.add(base + 2)));
+        let d2 = vsubq_f64(vld1q_f64(ap.add(base + 4)), vld1q_f64(bp.add(base + 4)));
+        let d3 = vsubq_f64(vld1q_f64(ap.add(base + 6)), vld1q_f64(bp.add(base + 6)));
+        s0 = vfmaq_f64(s0, d0, d0);
+        s1 = vfmaq_f64(s1, d1, d1);
+        s2 = vfmaq_f64(s2, d2, d2);
+        s3 = vfmaq_f64(s3, d3, d3);
+    }
+    let mut result = vaddvq_f64(s0) + vaddvq_f64(s1) + vaddvq_f64(s2) + vaddvq_f64(s3);
+    let mut i = chunks8 * 8;
+    while i + 2 <= n {
+        let d = vsubq_f64(vld1q_f64(ap.add(i)), vld1q_f64(bp.add(i)));
+        result += vaddvq_f64(vfmaq_f64(vdupq_n_f64(0.0), d, d));
+        i += 2;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len).
+        let d = *a.get_unchecked(i) - *b.get_unchecked(i);
+        result += d * d;
+        i += 1;
+    }
+    result
+}
+
+/// L1 (Manhattan) distance over f64.
+#[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
+pub unsafe fn l1_f64_neon(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::aarch64::{
+        float64x2_t, vabdq_f64, vaddq_f64, vaddvq_f64, vdupq_n_f64, vld1q_f64,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks8 = n / 8;
+    let mut s0: float64x2_t = vdupq_n_f64(0.0);
+    let mut s1: float64x2_t = vdupq_n_f64(0.0);
+    let mut s2: float64x2_t = vdupq_n_f64(0.0);
+    let mut s3: float64x2_t = vdupq_n_f64(0.0);
+    for i in 0..chunks8 {
+        let base = i * 8;
+        s0 = vaddq_f64(
+            s0,
+            vabdq_f64(vld1q_f64(ap.add(base)), vld1q_f64(bp.add(base))),
+        );
+        s1 = vaddq_f64(
+            s1,
+            vabdq_f64(vld1q_f64(ap.add(base + 2)), vld1q_f64(bp.add(base + 2))),
+        );
+        s2 = vaddq_f64(
+            s2,
+            vabdq_f64(vld1q_f64(ap.add(base + 4)), vld1q_f64(bp.add(base + 4))),
+        );
+        s3 = vaddq_f64(
+            s3,
+            vabdq_f64(vld1q_f64(ap.add(base + 6)), vld1q_f64(bp.add(base + 6))),
+        );
+    }
+    let mut result = vaddvq_f64(s0) + vaddvq_f64(s1) + vaddvq_f64(s2) + vaddvq_f64(s3);
+    let mut i = chunks8 * 8;
+    while i + 2 <= n {
+        result += vaddvq_f64(vabdq_f64(vld1q_f64(ap.add(i)), vld1q_f64(bp.add(i))));
+        i += 2;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len).
+        result += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
+        i += 1;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

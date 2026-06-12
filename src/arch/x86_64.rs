@@ -1336,6 +1336,393 @@ pub unsafe fn slot_hamming_u32_avx2(a: &[u32], b: &[u32]) -> u32 {
     diff
 }
 
+// ---------------------------------------------------------------------------
+// f64 reductions. AVX-512: 8 doubles/zmm, masked tail (no scalar remainder).
+// AVX2: 4 doubles/ymm + extract-add cascade. Mirror the f32 kernels.
+// ---------------------------------------------------------------------------
+
+#[target_feature(enable = "avx512f")]
+#[allow(unsafe_code)]
+pub unsafe fn dot_f64_avx512(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m512d, __mmask8, _mm512_add_pd, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_maskz_loadu_pd,
+        _mm512_reduce_add_pd, _mm512_setzero_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks32 = n / 32;
+    let mut s0: __m512d = _mm512_setzero_pd();
+    let mut s1: __m512d = _mm512_setzero_pd();
+    let mut s2: __m512d = _mm512_setzero_pd();
+    let mut s3: __m512d = _mm512_setzero_pd();
+    for i in 0..chunks32 {
+        let base = i * 32;
+        s0 = _mm512_fmadd_pd(
+            _mm512_loadu_pd(ap.add(base)),
+            _mm512_loadu_pd(bp.add(base)),
+            s0,
+        );
+        s1 = _mm512_fmadd_pd(
+            _mm512_loadu_pd(ap.add(base + 8)),
+            _mm512_loadu_pd(bp.add(base + 8)),
+            s1,
+        );
+        s2 = _mm512_fmadd_pd(
+            _mm512_loadu_pd(ap.add(base + 16)),
+            _mm512_loadu_pd(bp.add(base + 16)),
+            s2,
+        );
+        s3 = _mm512_fmadd_pd(
+            _mm512_loadu_pd(ap.add(base + 24)),
+            _mm512_loadu_pd(bp.add(base + 24)),
+            s3,
+        );
+    }
+    let mut acc = _mm512_add_pd(_mm512_add_pd(s0, s1), _mm512_add_pd(s2, s3));
+    let mut i = chunks32 * 32;
+    while i + 8 <= n {
+        acc = _mm512_fmadd_pd(_mm512_loadu_pd(ap.add(i)), _mm512_loadu_pd(bp.add(i)), acc);
+        i += 8;
+    }
+    let rem = n - i;
+    if rem > 0 {
+        let mask: __mmask8 = (1u16 << rem) as u8 - 1;
+        let va = _mm512_maskz_loadu_pd(mask, ap.add(i));
+        let vb = _mm512_maskz_loadu_pd(mask, bp.add(i));
+        acc = _mm512_fmadd_pd(va, vb, acc);
+    }
+    _mm512_reduce_add_pd(acc)
+}
+
+#[target_feature(enable = "avx512f")]
+#[allow(unsafe_code)]
+pub unsafe fn l2_squared_f64_avx512(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m512d, __mmask8, _mm512_add_pd, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_maskz_loadu_pd,
+        _mm512_reduce_add_pd, _mm512_setzero_pd, _mm512_sub_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks32 = n / 32;
+    let mut s0: __m512d = _mm512_setzero_pd();
+    let mut s1: __m512d = _mm512_setzero_pd();
+    let mut s2: __m512d = _mm512_setzero_pd();
+    let mut s3: __m512d = _mm512_setzero_pd();
+    for i in 0..chunks32 {
+        let base = i * 32;
+        let d0 = _mm512_sub_pd(_mm512_loadu_pd(ap.add(base)), _mm512_loadu_pd(bp.add(base)));
+        let d1 = _mm512_sub_pd(
+            _mm512_loadu_pd(ap.add(base + 8)),
+            _mm512_loadu_pd(bp.add(base + 8)),
+        );
+        let d2 = _mm512_sub_pd(
+            _mm512_loadu_pd(ap.add(base + 16)),
+            _mm512_loadu_pd(bp.add(base + 16)),
+        );
+        let d3 = _mm512_sub_pd(
+            _mm512_loadu_pd(ap.add(base + 24)),
+            _mm512_loadu_pd(bp.add(base + 24)),
+        );
+        s0 = _mm512_fmadd_pd(d0, d0, s0);
+        s1 = _mm512_fmadd_pd(d1, d1, s1);
+        s2 = _mm512_fmadd_pd(d2, d2, s2);
+        s3 = _mm512_fmadd_pd(d3, d3, s3);
+    }
+    let mut acc = _mm512_add_pd(_mm512_add_pd(s0, s1), _mm512_add_pd(s2, s3));
+    let mut i = chunks32 * 32;
+    while i + 8 <= n {
+        let d = _mm512_sub_pd(_mm512_loadu_pd(ap.add(i)), _mm512_loadu_pd(bp.add(i)));
+        acc = _mm512_fmadd_pd(d, d, acc);
+        i += 8;
+    }
+    let rem = n - i;
+    if rem > 0 {
+        let mask: __mmask8 = (1u16 << rem) as u8 - 1;
+        let d = _mm512_sub_pd(
+            _mm512_maskz_loadu_pd(mask, ap.add(i)),
+            _mm512_maskz_loadu_pd(mask, bp.add(i)),
+        );
+        acc = _mm512_fmadd_pd(d, d, acc);
+    }
+    _mm512_reduce_add_pd(acc)
+}
+
+#[target_feature(enable = "avx512f")]
+#[allow(unsafe_code)]
+pub unsafe fn l1_f64_avx512(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m512d, __mmask8, _mm512_abs_pd, _mm512_add_pd, _mm512_loadu_pd, _mm512_maskz_loadu_pd,
+        _mm512_reduce_add_pd, _mm512_setzero_pd, _mm512_sub_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks32 = n / 32;
+    let mut s0: __m512d = _mm512_setzero_pd();
+    let mut s1: __m512d = _mm512_setzero_pd();
+    let mut s2: __m512d = _mm512_setzero_pd();
+    let mut s3: __m512d = _mm512_setzero_pd();
+    for i in 0..chunks32 {
+        let base = i * 32;
+        s0 = _mm512_add_pd(
+            s0,
+            _mm512_abs_pd(_mm512_sub_pd(
+                _mm512_loadu_pd(ap.add(base)),
+                _mm512_loadu_pd(bp.add(base)),
+            )),
+        );
+        s1 = _mm512_add_pd(
+            s1,
+            _mm512_abs_pd(_mm512_sub_pd(
+                _mm512_loadu_pd(ap.add(base + 8)),
+                _mm512_loadu_pd(bp.add(base + 8)),
+            )),
+        );
+        s2 = _mm512_add_pd(
+            s2,
+            _mm512_abs_pd(_mm512_sub_pd(
+                _mm512_loadu_pd(ap.add(base + 16)),
+                _mm512_loadu_pd(bp.add(base + 16)),
+            )),
+        );
+        s3 = _mm512_add_pd(
+            s3,
+            _mm512_abs_pd(_mm512_sub_pd(
+                _mm512_loadu_pd(ap.add(base + 24)),
+                _mm512_loadu_pd(bp.add(base + 24)),
+            )),
+        );
+    }
+    let mut acc = _mm512_add_pd(_mm512_add_pd(s0, s1), _mm512_add_pd(s2, s3));
+    let mut i = chunks32 * 32;
+    while i + 8 <= n {
+        let d = _mm512_sub_pd(_mm512_loadu_pd(ap.add(i)), _mm512_loadu_pd(bp.add(i)));
+        acc = _mm512_add_pd(acc, _mm512_abs_pd(d));
+        i += 8;
+    }
+    let rem = n - i;
+    if rem > 0 {
+        let mask: __mmask8 = (1u16 << rem) as u8 - 1;
+        let d = _mm512_sub_pd(
+            _mm512_maskz_loadu_pd(mask, ap.add(i)),
+            _mm512_maskz_loadu_pd(mask, bp.add(i)),
+        );
+        acc = _mm512_add_pd(acc, _mm512_abs_pd(d));
+    }
+    _mm512_reduce_add_pd(acc)
+}
+
+/// Horizontal sum of a `__m256d` (4 doubles).
+#[inline]
+#[target_feature(enable = "avx")]
+#[allow(unsafe_code)]
+unsafe fn hsum256_pd(v: std::arch::x86_64::__m256d) -> f64 {
+    use std::arch::x86_64::{
+        _mm256_castpd256_pd128, _mm256_extractf128_pd, _mm_add_pd, _mm_cvtsd_f64, _mm_unpackhi_pd,
+    };
+    let lo = _mm256_castpd256_pd128(v);
+    let hi = _mm256_extractf128_pd::<1>(v);
+    let sum = _mm_add_pd(lo, hi);
+    _mm_cvtsd_f64(_mm_add_pd(sum, _mm_unpackhi_pd(sum, sum)))
+}
+
+#[target_feature(enable = "avx2,fma")]
+#[allow(unsafe_code)]
+pub unsafe fn dot_f64_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m256d, _mm256_add_pd, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_setzero_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks16 = n / 16;
+    let mut s0: __m256d = _mm256_setzero_pd();
+    let mut s1: __m256d = _mm256_setzero_pd();
+    let mut s2: __m256d = _mm256_setzero_pd();
+    let mut s3: __m256d = _mm256_setzero_pd();
+    for i in 0..chunks16 {
+        let base = i * 16;
+        s0 = _mm256_fmadd_pd(
+            _mm256_loadu_pd(ap.add(base)),
+            _mm256_loadu_pd(bp.add(base)),
+            s0,
+        );
+        s1 = _mm256_fmadd_pd(
+            _mm256_loadu_pd(ap.add(base + 4)),
+            _mm256_loadu_pd(bp.add(base + 4)),
+            s1,
+        );
+        s2 = _mm256_fmadd_pd(
+            _mm256_loadu_pd(ap.add(base + 8)),
+            _mm256_loadu_pd(bp.add(base + 8)),
+            s2,
+        );
+        s3 = _mm256_fmadd_pd(
+            _mm256_loadu_pd(ap.add(base + 12)),
+            _mm256_loadu_pd(bp.add(base + 12)),
+            s3,
+        );
+    }
+    let acc = _mm256_add_pd(_mm256_add_pd(s0, s1), _mm256_add_pd(s2, s3));
+    let mut result = hsum256_pd(acc);
+    let mut i = chunks16 * 16;
+    while i + 4 <= n {
+        result += hsum256_pd(_mm256_fmadd_pd(
+            _mm256_loadu_pd(ap.add(i)),
+            _mm256_loadu_pd(bp.add(i)),
+            _mm256_setzero_pd(),
+        ));
+        i += 4;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len).
+        result += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "avx2,fma")]
+#[allow(unsafe_code)]
+pub unsafe fn l2_squared_f64_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m256d, _mm256_add_pd, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_setzero_pd, _mm256_sub_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks16 = n / 16;
+    let mut s0: __m256d = _mm256_setzero_pd();
+    let mut s1: __m256d = _mm256_setzero_pd();
+    let mut s2: __m256d = _mm256_setzero_pd();
+    let mut s3: __m256d = _mm256_setzero_pd();
+    for i in 0..chunks16 {
+        let base = i * 16;
+        let d0 = _mm256_sub_pd(_mm256_loadu_pd(ap.add(base)), _mm256_loadu_pd(bp.add(base)));
+        let d1 = _mm256_sub_pd(
+            _mm256_loadu_pd(ap.add(base + 4)),
+            _mm256_loadu_pd(bp.add(base + 4)),
+        );
+        let d2 = _mm256_sub_pd(
+            _mm256_loadu_pd(ap.add(base + 8)),
+            _mm256_loadu_pd(bp.add(base + 8)),
+        );
+        let d3 = _mm256_sub_pd(
+            _mm256_loadu_pd(ap.add(base + 12)),
+            _mm256_loadu_pd(bp.add(base + 12)),
+        );
+        s0 = _mm256_fmadd_pd(d0, d0, s0);
+        s1 = _mm256_fmadd_pd(d1, d1, s1);
+        s2 = _mm256_fmadd_pd(d2, d2, s2);
+        s3 = _mm256_fmadd_pd(d3, d3, s3);
+    }
+    let acc = _mm256_add_pd(_mm256_add_pd(s0, s1), _mm256_add_pd(s2, s3));
+    let mut result = hsum256_pd(acc);
+    let mut i = chunks16 * 16;
+    while i + 4 <= n {
+        let d = _mm256_sub_pd(_mm256_loadu_pd(ap.add(i)), _mm256_loadu_pd(bp.add(i)));
+        result += hsum256_pd(_mm256_fmadd_pd(d, d, _mm256_setzero_pd()));
+        i += 4;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len).
+        let d = *a.get_unchecked(i) - *b.get_unchecked(i);
+        result += d * d;
+        i += 1;
+    }
+    result
+}
+
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_code)]
+pub unsafe fn l1_f64_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::{
+        __m256d, _mm256_add_pd, _mm256_andnot_pd, _mm256_loadu_pd, _mm256_set1_pd,
+        _mm256_setzero_pd, _mm256_sub_pd,
+    };
+    let n = a.len().min(b.len());
+    if n == 0 {
+        return 0.0;
+    }
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    // abs via andnot with the sign-bit mask.
+    let signmask = _mm256_set1_pd(-0.0);
+    let chunks16 = n / 16;
+    let mut s0: __m256d = _mm256_setzero_pd();
+    let mut s1: __m256d = _mm256_setzero_pd();
+    let mut s2: __m256d = _mm256_setzero_pd();
+    let mut s3: __m256d = _mm256_setzero_pd();
+    for i in 0..chunks16 {
+        let base = i * 16;
+        s0 = _mm256_add_pd(
+            s0,
+            _mm256_andnot_pd(
+                signmask,
+                _mm256_sub_pd(_mm256_loadu_pd(ap.add(base)), _mm256_loadu_pd(bp.add(base))),
+            ),
+        );
+        s1 = _mm256_add_pd(
+            s1,
+            _mm256_andnot_pd(
+                signmask,
+                _mm256_sub_pd(
+                    _mm256_loadu_pd(ap.add(base + 4)),
+                    _mm256_loadu_pd(bp.add(base + 4)),
+                ),
+            ),
+        );
+        s2 = _mm256_add_pd(
+            s2,
+            _mm256_andnot_pd(
+                signmask,
+                _mm256_sub_pd(
+                    _mm256_loadu_pd(ap.add(base + 8)),
+                    _mm256_loadu_pd(bp.add(base + 8)),
+                ),
+            ),
+        );
+        s3 = _mm256_add_pd(
+            s3,
+            _mm256_andnot_pd(
+                signmask,
+                _mm256_sub_pd(
+                    _mm256_loadu_pd(ap.add(base + 12)),
+                    _mm256_loadu_pd(bp.add(base + 12)),
+                ),
+            ),
+        );
+    }
+    let acc = _mm256_add_pd(_mm256_add_pd(s0, s1), _mm256_add_pd(s2, s3));
+    let mut result = hsum256_pd(acc);
+    let mut i = chunks16 * 16;
+    while i + 4 <= n {
+        let d = _mm256_andnot_pd(
+            signmask,
+            _mm256_sub_pd(_mm256_loadu_pd(ap.add(i)), _mm256_loadu_pd(bp.add(i))),
+        );
+        result += hsum256_pd(d);
+        i += 4;
+    }
+    while i < n {
+        // SAFETY: i < n = min(len).
+        result += (*a.get_unchecked(i) - *b.get_unchecked(i)).abs();
+        i += 1;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

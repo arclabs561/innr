@@ -267,6 +267,59 @@ pub fn slot_hamming<T: PartialEq>(a: &[T], b: &[T]) -> usize {
     a.iter().zip(b.iter()).filter(|(x, y)| x != y).count()
 }
 
+/// Per-position comparison counts between two slot vectors: how many positions
+/// are equal, how many have `a[i] < b[i]`, and how many have `a[i] > b[i]`.
+///
+/// This generalizes [`slot_hamming`] (which is `eq` complemented:
+/// `slot_hamming == len - counts.eq`). The inequality counts are what the
+/// SetSketch (Ertl 2021) and UltraLogLog (Ertl 2024) joint estimators consume:
+/// classic MinHash uses only the equal count, while those structures use the
+/// `(eq, lt, gt)` triple plus the cardinalities to form a maximum-likelihood
+/// Jaccard / cardinality estimate. innr returns the agnostic counts; the
+/// estimator that interprets them belongs in the consuming sketch crate.
+///
+/// Compares over `a.len().min(b.len())` positions. Portable; LLVM
+/// auto-vectorizes the compare-and-count loop for fixed-width integer slots.
+/// A hand-written SIMD specialization can follow once a consumer profiles it.
+///
+/// # Example
+///
+/// ```rust
+/// use innr::{slot_compare_counts, SlotCounts};
+///
+/// let a = [3u16, 1, 4, 1, 5];
+/// let b = [3u16, 1, 2, 9, 5];
+/// assert_eq!(
+///     slot_compare_counts(&a, &b),
+///     SlotCounts { eq: 3, lt: 1, gt: 1 }
+/// );
+/// ```
+#[inline]
+#[must_use]
+pub fn slot_compare_counts<T: Ord>(a: &[T], b: &[T]) -> SlotCounts {
+    let mut c = SlotCounts::default();
+    for (x, y) in a.iter().zip(b.iter()) {
+        match x.cmp(y) {
+            core::cmp::Ordering::Equal => c.eq += 1,
+            core::cmp::Ordering::Less => c.lt += 1,
+            core::cmp::Ordering::Greater => c.gt += 1,
+        }
+    }
+    c
+}
+
+/// Per-position comparison counts from [`slot_compare_counts`]: `eq + lt + gt`
+/// equals the number of compared positions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SlotCounts {
+    /// Positions where `a[i] == b[i]`.
+    pub eq: usize,
+    /// Positions where `a[i] < b[i]`.
+    pub lt: usize,
+    /// Positions where `a[i] > b[i]`.
+    pub gt: usize,
+}
+
 /// MinHash Jaccard-similarity estimate from two `u32` sketches: the fraction
 /// of matching slots, `1 - slot_hamming_u32(a, b) / len`.
 ///
@@ -416,6 +469,26 @@ mod tests {
         assert_eq!(slot_hamming_u16(&[], &[]), 0);
         assert_eq!(slot_hamming_u16(&[1, 2, 3], &[1, 2, 3]), 0);
         assert_eq!(slot_hamming_u16(&[1, 2, 3], &[9, 9, 9]), 3);
+    }
+
+    #[test]
+    fn slot_compare_counts_basic_and_generalizes_hamming() {
+        let a = [3u16, 1, 4, 1, 5, 9];
+        let b = [3u16, 1, 2, 9, 5, 9];
+        let c = slot_compare_counts(&a, &b);
+        assert_eq!(
+            c,
+            SlotCounts {
+                eq: 4,
+                lt: 1,
+                gt: 1
+            }
+        );
+        // eq + lt + gt == compared length; slot_hamming == len - eq.
+        assert_eq!(c.eq + c.lt + c.gt, a.len());
+        assert_eq!(slot_hamming(&a, &b), a.len() - c.eq);
+        // empty
+        assert_eq!(slot_compare_counts::<u32>(&[], &[]), SlotCounts::default());
     }
 
     #[test]

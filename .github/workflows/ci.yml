@@ -145,7 +145,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check ${{ matrix.target }}
-        run: cargo check --target ${{ matrix.target }} --all-features
+        # Retry the whole step: these jobs resolve the dev-dep graph
+        # (criterion -> cpu-time -> winapi) and a sustained crates.io blip
+        # exhausts the in-process CARGO_NET_RETRY. A fresh invocation with a
+        # delay survives a bounded outage.
+        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: cargo check --target ${{ matrix.target }} --all-features
 
   # QEMU-based ARM testing (actual execution via emulation)
   # Uses cross-rs for seamless QEMU integration

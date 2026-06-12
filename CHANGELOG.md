@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1
+
+Additive release. New SIMD kernels, introspection, and a substantially
+widened test surface; the only behavior change is a panic-on-mismatch fix
+in `fast_cosine_dispatch` (see below).
+
+- f64 reductions are now SIMD-dispatched: `dense_f64::{dot_f64, l2_distance_squared_f64, l1_distance_f64}` (and `cosine_f64`/`norm_f64`/`l2_distance_f64` via them) run AVX-512 (8 doubles/zmm, masked tail) / AVX2 / NEON with exact FMA accumulation. Previously portable-only.
+- `slot_hamming_u16` and `slot_hamming_u64`: SIMD differing-slot counts for b-bit MinHash at b=16 (u16) and 64-bit sketches (u64), alongside the existing `slot_hamming_u32`. AVX-512BW/AVX2/NEON.
+- `backend::{dense_backend, slot_backend}`: report which kernel family (`Avx512`/`Avx2Fma`/`Neon`/`Portable`) a given length dispatches to on the current machine.
+- `dense::normalize_with_norm`: normalize in place and return the original L2 norm.
+- Fixes: `sparse_dense_dot` no longer reaches out-of-bounds on unsorted input from safe code; `fast_cosine` compares squared norms against the squared epsilon (small-norm vectors no longer collapse to 0); `TopK` uses total order so a NaN candidate cannot poison the eviction gate; `PackedBinary`/`PackedTernary::new` mask padding bits; `maxsim_cosine` pre-checks dimensions; `fast_cosine_dispatch` now panics on length mismatch regardless of input size (previously truncated silently for SIMD-sized inputs).
+- Testing: AVX-512 kernels now execute in CI under Intel SDE; added differential fuzz harnesses, a native Linux-ARM job, coverage and weekly mutation jobs, an aarch64-target clippy row, and l1/mixed-dot differential coverage.
+- Docs: crate-level Contracts section; `minhash_jaccard` documented as unbiased for classic MinHash / wide slots and at b>=14, with the small-b b-bit correction noted and deliberately left to the consumer.
+
 ## 0.6.0
 
 - New optional `anndists` feature: implements `anndists::dist::Distance` for `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, and `DistSlotU32`, making innr's metrics drop-in distances for `hnsw_rs` (which binds to anndists's trait). The impls delegate to innr's own `Distance` trait so the two cannot drift. Verified end-to-end in `tests/anndists_interop.rs` by building real `hnsw_rs` indexes (u32 MinHash sketches with `DistSlotU32`, f32 embeddings with `DistCosine`). Closes the adapter gap documented in 0.5.1 (issue #1).

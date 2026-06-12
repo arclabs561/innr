@@ -125,6 +125,57 @@ pub fn slot_hamming_u32_portable(a: &[u32], b: &[u32]) -> u32 {
     a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32
 }
 
+/// Count differing `u64` slots: the SIMD-accelerated path for 64-bit MinHash
+/// sketches (e.g. probminhash `SuperMinHash2` output).
+///
+/// AVX-512 / AVX2 on x86_64, NEON on aarch64, portable elsewhere. Panics on a
+/// length mismatch (like [`slot_hamming_u32`]); for the truncating contract or
+/// other widths use the generic [`slot_hamming`].
+///
+/// ```rust
+/// use innr::slot_hamming_u64;
+///
+/// let a = [1u64, 2, 3, 4];
+/// let b = [1u64, 0, 3, 9];
+/// assert_eq!(slot_hamming_u64(&a, &b), 2);
+/// ```
+#[inline]
+#[must_use]
+#[allow(unsafe_code)]
+pub fn slot_hamming_u64(a: &[u64], b: &[u64]) -> u64 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::slot_hamming_u64: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    let n = a.len();
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= 8 && is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f verified.
+            return unsafe { arch::x86_64::slot_hamming_u64_avx512(a, b) };
+        }
+        if n >= 4 && is_x86_feature_detected!("avx2") {
+            // SAFETY: avx2 verified.
+            return unsafe { arch::x86_64::slot_hamming_u64_avx2(a, b) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 2 {
+            // SAFETY: NEON is baseline on aarch64.
+            return unsafe { arch::aarch64::slot_hamming_u64_neon(a, b) };
+        }
+    }
+    #[allow(unreachable_code)]
+    {
+        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
+    }
+}
+
 /// Generic integer-slot Hamming distance: the number of positions where
 /// `a[i] != b[i]`, for slots of any [`PartialEq`] type.
 ///
@@ -239,6 +290,42 @@ pub fn jaccard_distance(a: &[u32], b: &[u32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn slot_hamming_u64_ref(a: &[u64], b: &[u64]) -> u64 {
+        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
+    }
+
+    #[test]
+    fn slot_hamming_u64_matches_reference_across_boundaries() {
+        // Cross the u64 dispatch boundaries (AVX-512=8, AVX2=4, NEON=2) and
+        // their non-multiples, exercising every SIMD tail.
+        for n in [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 64, 100, 257] {
+            for seed in 0..4u64 {
+                let a: Vec<u64> = (0..n as u64)
+                    .map(|i| i.wrapping_mul(2_654_435_761) ^ seed)
+                    .collect();
+                let mut b = a.clone();
+                // Flip a deterministic subset of slots.
+                for (i, slot) in b.iter_mut().enumerate() {
+                    if (i as u64 + seed).is_multiple_of(3) {
+                        *slot = slot.wrapping_add(1);
+                    }
+                }
+                assert_eq!(
+                    slot_hamming_u64(&a, &b),
+                    slot_hamming_u64_ref(&a, &b),
+                    "n={n}, seed={seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn slot_hamming_u64_edges() {
+        assert_eq!(slot_hamming_u64(&[], &[]), 0);
+        assert_eq!(slot_hamming_u64(&[1, 2, 3], &[1, 2, 3]), 0);
+        assert_eq!(slot_hamming_u64(&[1, 2, 3], &[9, 9, 9]), 3);
+    }
 
     #[test]
     fn test_slot_hamming_u32_basic() {

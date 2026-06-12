@@ -636,6 +636,28 @@ pub unsafe fn slot_hamming_u32_neon(a: &[u32], b: &[u32]) -> u32 {
 // down; 4-way unrolled = 8 doubles per iteration.
 // ---------------------------------------------------------------------------
 
+/// Count differing u64 slots (2 per q-register).
+#[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u64_neon(a: &[u64], b: &[u64]) -> u64 {
+    use std::arch::aarch64::{vaddvq_u64, vceqq_u64, vld1q_u64, vshrq_n_u64};
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks2 = n / 2;
+    let mut equal: u64 = 0;
+    for i in 0..chunks2 {
+        let base = i * 2;
+        // vceqq sets all-ones per equal lane; shift to 0/1 then horizontal-add.
+        let eq = vceqq_u64(vld1q_u64(ap.add(base)), vld1q_u64(bp.add(base)));
+        equal += vaddvq_u64(vshrq_n_u64::<63>(eq));
+    }
+    let mut diff = (chunks2 as u64) * 2 - equal;
+    for i in (chunks2 * 2)..n {
+        diff += u64::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
 /// Dot product over f64. NEON is baseline on aarch64.
 #[target_feature(enable = "neon")]
 #[allow(unsafe_code)]

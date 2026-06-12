@@ -1337,6 +1337,58 @@ pub unsafe fn slot_hamming_u32_avx2(a: &[u32], b: &[u32]) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// u64 integer-slot Hamming: count differing u64 slots (probminhash u64
+// sketches). AVX-512: 8 slots/zmm via epi64 mask compare; AVX2: 4/ymm via
+// epi64 compare + movemask_pd. Mirror slot_hamming_u32.
+// ---------------------------------------------------------------------------
+
+#[target_feature(enable = "avx512f")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u64_avx512(a: &[u64], b: &[u64]) -> u64 {
+    use std::arch::x86_64::{_mm512_cmpeq_epi64_mask, _mm512_loadu_si512};
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks8 = n / 8;
+    let mut diff: u64 = 0;
+    for i in 0..chunks8 {
+        let base = i * 8;
+        let va = _mm512_loadu_si512(ap.add(base) as *const _);
+        let vb = _mm512_loadu_si512(bp.add(base) as *const _);
+        // 8-bit mask, bit j = lane j equal; differing = 8 - popcount.
+        diff += u64::from(8 - _mm512_cmpeq_epi64_mask(va, vb).count_ones());
+    }
+    for i in (chunks8 * 8)..n {
+        diff += u64::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u64_avx2(a: &[u64], b: &[u64]) -> u64 {
+    use std::arch::x86_64::{
+        __m256i, _mm256_castsi256_pd, _mm256_cmpeq_epi64, _mm256_loadu_si256, _mm256_movemask_pd,
+    };
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks4 = n / 4;
+    let mut diff: u64 = 0;
+    for i in 0..chunks4 {
+        let base = i * 4;
+        let va = _mm256_loadu_si256(ap.add(base) as *const __m256i);
+        let vb = _mm256_loadu_si256(bp.add(base) as *const __m256i);
+        // Equal lanes become all-ones (sign bit set); movemask_pd gives a
+        // 4-bit equal mask, so differing = 4 - popcount.
+        let eq = _mm256_movemask_pd(_mm256_castsi256_pd(_mm256_cmpeq_epi64(va, vb)));
+        diff += u64::from(4 - (eq as u32).count_ones());
+    }
+    for i in (chunks4 * 4)..n {
+        diff += u64::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
+// ---------------------------------------------------------------------------
 // f64 reductions. AVX-512: 8 doubles/zmm, masked tail (no scalar remainder).
 // AVX2: 4 doubles/ymm + extract-add cascade. Mirror the f32 kernels.
 // ---------------------------------------------------------------------------

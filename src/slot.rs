@@ -8,16 +8,26 @@
 //! # MinHash
 //!
 //! The primary use case is MinHash sketches. Given two sketches `a` and `b`
-//! of equal length, the fraction of matching slots is an unbiased estimator
-//! of the Jaccard similarity of the original sets:
+//! of equal length, the fraction of matching slots estimates the Jaccard
+//! similarity of the original sets:
 //!
 //! ```text
 //! J_hat(A, B) = matches / len = 1 - slot_hamming(a, b) / len
 //! ```
 //!
-//! [`minhash_jaccard`] returns this estimate directly. The same primitive is
-//! sometimes called "integer Hamming" or, confusingly, "Jaccard" in other
-//! libraries.
+//! [`minhash_jaccard`] returns this directly. It is unbiased for classic
+//! MinHash (full min-values) and for ProbMinHash / SuperMinHash slot
+//! signatures. For *b-bit* MinHash (Li & König 2010), where each min-value is
+//! truncated to its low `b` bits to save space, two distinct slots agree by
+//! chance with probability up to `2^-b`, so `matches/len` is biased upward by
+//! that term; an unbiased estimate then needs the b-bit correction
+//! `(matches/len - C1) / (1 - C2)` with `C1, C2 <= 2^-b`. The correction is
+//! negligible at `b >= ~14` (at `b = 16` it is `2^-16 ~ 1.5e-5`), which is the
+//! common SIMD-friendly width, so `matches/len` is accurate there and
+//! [`minhash_jaccard`] applies as-is. innr does not implement the small-b
+//! correction (it needs set cardinalities and universe size, which a sketch
+//! alone does not carry). The same primitive is sometimes called "integer
+//! Hamming" or, confusingly, "Jaccard" in other libraries.
 //!
 //! # Similarity vs distance
 //!
@@ -31,10 +41,11 @@
 //!
 //! # Dispatch
 //!
-//! [`slot_hamming_u32`] uses the same runtime-dispatch pattern as the rest of
-//! the crate (AVX-512 > AVX2 > NEON > portable). For other widths, the generic
-//! [`slot_hamming`] relies on LLVM auto-vectorization of the integer-compare
-//! loop, which is effective for `u16`/`u64`.
+//! [`slot_hamming_u16`], [`slot_hamming_u32`], and [`slot_hamming_u64`] each
+//! use the crate's runtime-dispatch pattern (AVX-512 > AVX2 > NEON > portable);
+//! `u16` is the b=16 b-bit width and packs the most lanes per register. For
+//! any other slot type the generic [`slot_hamming`] relies on LLVM
+//! auto-vectorization of the integer-compare loop.
 
 // arch is only used on architectures with SIMD dispatch
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -123,6 +134,59 @@ pub fn slot_hamming_u32(a: &[u32], b: &[u32]) -> u32 {
 #[must_use]
 pub fn slot_hamming_u32_portable(a: &[u32], b: &[u32]) -> u32 {
     a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32
+}
+
+/// Count differing `u16` slots: the SIMD-accelerated path for b-bit MinHash
+/// sketches truncated to 16 bits (b=16, the SIMD-friendly width where the
+/// b-bit collision correction is negligible so matches/k estimates Jaccard
+/// directly).
+///
+/// AVX-512BW / AVX2 on x86_64, NEON on aarch64, portable elsewhere. Panics on
+/// a length mismatch; returns the differing-slot count (fits `u32` for any
+/// realistic sketch).
+///
+/// ```rust
+/// use innr::slot_hamming_u16;
+///
+/// let a = [1u16, 2, 3, 4];
+/// let b = [1u16, 0, 3, 9];
+/// assert_eq!(slot_hamming_u16(&a, &b), 2);
+/// ```
+#[inline]
+#[must_use]
+#[allow(unsafe_code)]
+pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::slot_hamming_u16: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    let n = a.len();
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= 32 && is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
+            // SAFETY: avx512f+bw verified.
+            return unsafe { arch::x86_64::slot_hamming_u16_avx512(a, b) };
+        }
+        if n >= 16 && is_x86_feature_detected!("avx2") {
+            // SAFETY: avx2 verified.
+            return unsafe { arch::x86_64::slot_hamming_u16_avx2(a, b) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 8 {
+            // SAFETY: NEON is baseline on aarch64.
+            return unsafe { arch::aarch64::slot_hamming_u16_neon(a, b) };
+        }
+    }
+    #[allow(unreachable_code)]
+    {
+        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32
+    }
 }
 
 /// Count differing `u64` slots: the SIMD-accelerated path for 64-bit MinHash
@@ -325,6 +389,33 @@ mod tests {
         assert_eq!(slot_hamming_u64(&[], &[]), 0);
         assert_eq!(slot_hamming_u64(&[1, 2, 3], &[1, 2, 3]), 0);
         assert_eq!(slot_hamming_u64(&[1, 2, 3], &[9, 9, 9]), 3);
+    }
+
+    #[test]
+    fn slot_hamming_u16_matches_reference_across_boundaries() {
+        // Cross the u16 dispatch boundaries (AVX-512BW=32, AVX2=16, NEON=8).
+        for n in [1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 100, 257, 1024] {
+            for seed in 0..4u32 {
+                let a: Vec<u16> = (0..n as u32)
+                    .map(|i| (i.wrapping_mul(40_503) ^ seed) as u16)
+                    .collect();
+                let mut b = a.clone();
+                for (i, slot) in b.iter_mut().enumerate() {
+                    if (i as u32 + seed).is_multiple_of(3) {
+                        *slot = slot.wrapping_add(1);
+                    }
+                }
+                let want = a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32;
+                assert_eq!(slot_hamming_u16(&a, &b), want, "n={n}, seed={seed}");
+            }
+        }
+    }
+
+    #[test]
+    fn slot_hamming_u16_edges() {
+        assert_eq!(slot_hamming_u16(&[], &[]), 0);
+        assert_eq!(slot_hamming_u16(&[1, 2, 3], &[1, 2, 3]), 0);
+        assert_eq!(slot_hamming_u16(&[1, 2, 3], &[9, 9, 9]), 3);
     }
 
     #[test]

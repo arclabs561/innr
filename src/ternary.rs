@@ -76,6 +76,16 @@ impl PackedTernary {
             dimension,
             dimension.div_ceil(32)
         );
+        let mut data = data;
+        // Mask padding bit-pairs past `dimension` in the last word: distance
+        // ops popcount whole words, so stray pairs would otherwise count as
+        // phantom dimensions.
+        let rem = dimension % 32;
+        if rem != 0 {
+            if let Some(last) = data.last_mut() {
+                *last &= (1u64 << (rem * 2)) - 1;
+            }
+        }
         Self { data, dimension }
     }
 
@@ -329,6 +339,21 @@ pub fn sparsity(v: &PackedTernary) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn new_masks_padding_pairs() {
+        // Regression: unmasked padding bit-pairs past `dimension` counted as
+        // phantom nonzero dimensions in whole-word popcounts.
+        // Low 16 bits encode eight +1 values (pattern 01); the upper 48 bits
+        // are padding garbage that the constructor must mask away.
+        let dirty = super::PackedTernary::new(vec![0xFFFF_FFFF_FFFF_5555], 8);
+        let mut clean = super::PackedTernary::zeros(8);
+        for i in 0..8 {
+            clean.set(i, 1);
+        }
+        assert_eq!(dirty.nnz(), clean.nnz());
+        assert_eq!(dirty.data(), clean.data());
+    }
+
     use super::*;
 
     #[test]

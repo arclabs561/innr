@@ -23,7 +23,7 @@ use crate::MIN_DIM_SIMD;
 
 /// Minimum dimension for AVX-512 (64 floats = one unrolled iteration).
 #[cfg(target_arch = "x86_64")]
-const MIN_DIM_AVX512: usize = 64;
+pub(crate) const MIN_DIM_AVX512: usize = 64;
 
 /// Dot product of two vectors: `Σ(a[i] * b[i])`.
 ///
@@ -156,6 +156,25 @@ pub fn norm(v: &[f32]) -> f32 {
 /// assert!((norm(&v) - 1.0).abs() < 1e-6);
 /// ```
 pub fn normalize(v: &mut [f32]) {
+    let _ = normalize_with_norm(v);
+}
+
+/// Normalize `v` to unit length in place and return its original L2 norm.
+///
+/// Vectors with norm below `1e-9` are left unchanged (their norm is still
+/// returned). Several consumers need the pre-normalization norm (for
+/// rescaling, gradient code, or logging); without this they reimplement the
+/// norm-guard-scale loop by hand.
+///
+/// ```
+/// use innr::{normalize_with_norm, norm};
+///
+/// let mut v = [3.0_f32, 4.0];
+/// let original = normalize_with_norm(&mut v);
+/// assert!((original - 5.0).abs() < 1e-6);
+/// assert!((norm(&v) - 1.0).abs() < 1e-6);
+/// ```
+pub fn normalize_with_norm(v: &mut [f32]) -> f32 {
     let n = norm(v);
     if n > crate::NORM_EPSILON {
         let inv = 1.0 / n;
@@ -163,6 +182,7 @@ pub fn normalize(v: &mut [f32]) {
             *x *= inv;
         }
     }
+    n
 }
 
 /// Cosine similarity between two vectors.

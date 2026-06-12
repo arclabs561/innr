@@ -88,6 +88,7 @@
 mod arch;
 
 /// Binary (1-bit) quantization: encode, Hamming distance, dot product, Jaccard.
+pub mod backend;
 pub mod binary;
 
 /// Dense vector primitives: dot, cosine, norm, L2/L1 distance, matryoshka.
@@ -118,7 +119,7 @@ mod maxsim;
 // Re-export core operations
 pub use dense::{
     angular_distance, cosine, dot, l1_distance, l2_distance, l2_distance_squared,
-    matryoshka_cosine, matryoshka_dot, norm, normalize,
+    matryoshka_cosine, matryoshka_dot, norm, normalize, normalize_with_norm,
 };
 
 // Re-export binary operations

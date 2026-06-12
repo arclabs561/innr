@@ -42,11 +42,11 @@ use crate::arch;
 
 /// Minimum slot count for the AVX2 / NEON paths to be worthwhile.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-const MIN_SLOTS_SIMD: usize = 8;
+pub(crate) const MIN_SLOTS_SIMD: usize = 8;
 
 /// Minimum slot count for the AVX-512 path (16 lanes).
 #[cfg(target_arch = "x86_64")]
-const MIN_SLOTS_AVX512: usize = 16;
+pub(crate) const MIN_SLOTS_AVX512: usize = 16;
 
 /// Integer-slot Hamming distance over `u32` slots: the number of positions
 /// where `a[i] != b[i]`.

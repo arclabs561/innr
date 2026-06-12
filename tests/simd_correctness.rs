@@ -327,3 +327,65 @@ fn simd_invariant_cosine_range() {
         }
     }
 }
+
+// =============================================================================
+// L1 distance: differential vs scalar reference across dispatch boundaries.
+// Previously the only oracle test was NEON-gated in-file; a tail bug in the
+// AVX2/AVX-512 kernels would have passed the x86 CI job.
+// =============================================================================
+
+fn ref_l1(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
+}
+
+#[test]
+fn simd_correctness_l1_across_boundaries() {
+    for dim in [
+        1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 256, 768,
+    ] {
+        for seed in 0..5 {
+            let a = test_vec(dim, seed);
+            let b = test_vec(dim, seed + 1000);
+            let simd_result = innr::l1_distance(&a, &b);
+            let ref_result = ref_l1(&a, &b);
+            assert!(
+                approx_eq(simd_result, ref_result, 1e-4),
+                "l1 mismatch at dim={dim}, seed={seed}: simd={simd_result}, ref={ref_result}"
+            );
+        }
+    }
+}
+
+// =============================================================================
+// mixed f32 x u8 dot: exact recovery with identity quantization params.
+// The SIMD kernels were previously tested only through quantization-scale
+// tolerances, which would mask a sub-tolerance kernel bug.
+// =============================================================================
+
+#[test]
+fn simd_correctness_mixed_dot_exact() {
+    use innr::scalar::{asymmetric_dot_u8, quantize_u8, QuantizationParams};
+    // alpha = 255, offset = 0 makes dequantization the identity:
+    // result = (alpha/255) * mixed_dot + offset * query_sum = mixed_dot.
+    let params = QuantizationParams {
+        alpha: 255.0,
+        offset: 0.0,
+    };
+    for dim in [8, 16, 31, 32, 33, 64, 65, 128] {
+        for seed in 0..5_u64 {
+            // u8 corpus values and small-integer f32 queries: every product
+            // and partial sum is exactly representable in f32, so the SIMD
+            // kernel must match the reference bit-for-bit.
+            let corpus: Vec<f32> = (0..dim)
+                .map(|i| ((i as u64 * 31 + seed * 7) % 256) as f32)
+                .collect();
+            let query: Vec<f32> = (0..dim)
+                .map(|i| ((i as u64 * 13 + seed * 3) % 8) as f32)
+                .collect();
+            let qz = quantize_u8(&corpus, &params);
+            let expect: f32 = query.iter().zip(corpus.iter()).map(|(x, y)| x * y).sum();
+            let got = asymmetric_dot_u8(&query, &qz, &params);
+            assert_eq!(got, expect, "mixed dot mismatch at dim={dim}, seed={seed}");
+        }
+    }
+}

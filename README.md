@@ -5,15 +5,15 @@
 [![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
 SIMD-accelerated vector similarity primitives: dot, cosine, and
-Euclidean distance over `f32` / `i8` / `u8`, plus binary, ternary,
-and scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
+Euclidean distance over `f32` / `u8`, plus binary, ternary, and
+scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
 with scalar fallback.
 
 ## Quickstart
 
 ```toml
 [dependencies]
-innr = "0.2"
+innr = "0.6"
 ```
 
 ```rust
@@ -92,7 +92,7 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Vectors < 16 dimensions use portable code. MSRV 1.75 applies to aarch64 and portable targets; x86_64 requires Rust 1.89+ (AVX-512 intrinsic stabilization).
+Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). MSRV 1.75 applies to aarch64 and portable targets; x86_64 requires Rust 1.89+ (AVX-512 intrinsic stabilization).
 
 ## Performance
 

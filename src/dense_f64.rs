@@ -1,12 +1,16 @@
-//! Portable `f64` vector primitives.
+//! `f64` vector primitives.
 //!
 //! Mirrors the `f32` API in [`crate::dense`] for code paths that need higher
 //! precision (scientific computing, PageRank-style accumulation, statistical
-//! reductions). Portable implementations only -- explicit SIMD acceleration
-//! for these is tracked as a follow-up.
-//!
-//! The 4-way unrolled accumulator pattern from the `f32` portable path is
-//! preserved so LLVM auto-vectorization still kicks in on most targets.
+//! reductions). The reductions dispatch to SIMD at runtime (AVX-512 / AVX2 on
+//! x86_64, NEON on aarch64) with a 4-way-unrolled portable fallback; FMA makes
+//! the f64 paths at least as accurate as the scalar loop.
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::arch;
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+const MIN_DIM_SIMD_F64: usize = 8;
 
 /// Dot product of two `f64` vectors: `Σ(a[i] * b[i])`.
 ///
@@ -23,7 +27,35 @@
 /// ```
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f verified.
+            return unsafe { arch::x86_64::dot_f64_avx512(a, b) };
+        }
+        if n >= MIN_DIM_SIMD_F64
+            && std::arch::is_x86_feature_detected!("avx2")
+            && std::arch::is_x86_feature_detected!("fma")
+        {
+            // SAFETY: avx2+fma verified.
+            return unsafe { arch::x86_64::dot_f64_avx2(a, b) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            // SAFETY: NEON is baseline on aarch64.
+            return unsafe { arch::aarch64::dot_f64_neon(a, b) };
+        }
+    }
+    dot_f64_portable(a, b)
+}
+
+#[inline]
+fn dot_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
@@ -111,7 +143,35 @@ pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
 /// (skips the square root).
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn l2_distance_squared_f64(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f verified.
+            return unsafe { arch::x86_64::l2_squared_f64_avx512(a, b) };
+        }
+        if n >= MIN_DIM_SIMD_F64
+            && std::arch::is_x86_feature_detected!("avx2")
+            && std::arch::is_x86_feature_detected!("fma")
+        {
+            // SAFETY: avx2+fma verified.
+            return unsafe { arch::x86_64::l2_squared_f64_avx2(a, b) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            // SAFETY: NEON is baseline on aarch64.
+            return unsafe { arch::aarch64::l2_squared_f64_neon(a, b) };
+        }
+    }
+    l2_distance_squared_f64_portable(a, b)
+}
+
+#[inline]
+fn l2_distance_squared_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
@@ -162,7 +222,32 @@ pub fn l2_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 /// Useful as the convergence criterion for iterative methods (PageRank, k-means).
 #[inline]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn l1_distance_f64(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    #[cfg(target_arch = "x86_64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
+            // SAFETY: avx512f verified.
+            return unsafe { arch::x86_64::l1_f64_avx512(a, b) };
+        }
+        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: avx2 verified.
+            return unsafe { arch::x86_64::l1_f64_avx2(a, b) };
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            // SAFETY: NEON is baseline on aarch64.
+            return unsafe { arch::aarch64::l1_f64_neon(a, b) };
+        }
+    }
+    l1_distance_f64_portable(a, b)
+}
+
+#[inline]
+fn l1_distance_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
@@ -262,5 +347,42 @@ mod tests {
     fn l1_distance_basic() {
         assert!((l1_distance_f64(&[0.0, 0.0, 0.0], &[1.0, -2.0, 3.0]) - 6.0).abs() < 1e-12);
         assert_eq!(l1_distance_f64(&[1.0, 2.0], &[1.0, 2.0]), 0.0);
+    }
+
+    // Differential: dispatched SIMD vs the portable reference across the
+    // f64 dispatch boundary (8) and the unrolled-chunk boundaries (16/32),
+    // including non-multiples that exercise masked/scalar tails.
+    fn vec64(n: usize, seed: u64) -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                let x = (i as u64).wrapping_mul(2_654_435_761).wrapping_add(seed);
+                ((x % 2000) as f64 - 1000.0) / 100.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn simd_matches_portable_across_boundaries() {
+        for n in [
+            1, 2, 7, 8, 9, 15, 16, 17, 31, 32, 33, 40, 64, 65, 100, 257, 768,
+        ] {
+            for seed in 0..4 {
+                let a = vec64(n, seed);
+                let b = vec64(n, seed + 7);
+                let rel = |x: f64, y: f64| (x - y).abs() <= 1e-9 * x.abs().max(y.abs()).max(1.0);
+                assert!(rel(dot_f64(&a, &b), dot_f64_portable(&a, &b)), "dot n={n}");
+                assert!(
+                    rel(
+                        l2_distance_squared_f64(&a, &b),
+                        l2_distance_squared_f64_portable(&a, &b)
+                    ),
+                    "l2sq n={n}"
+                );
+                assert!(
+                    rel(l1_distance_f64(&a, &b), l1_distance_f64_portable(&a, &b)),
+                    "l1 n={n}"
+                );
+            }
+        }
     }
 }

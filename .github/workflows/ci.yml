@@ -207,9 +207,17 @@ jobs:
   # and survive a short adversarial burst (the kernels' main risk surface).
   fuzz-smoke:
     runs-on: ubuntu-latest
+    # Clear the workflow-level RUSTFLAGS (-Dwarnings): cargo-fuzz injects its
+    # own sanitizer flags, and the inherited value otherwise wins and leaves
+    # ASAN on a statically-linked libc ("sanitizer is incompatible with
+    # statically linked libc"). -crt-static lets the sanitizer link.
+    env:
+      RUSTFLAGS: "-C target-feature=-crt-static"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
         uses: taiki-e/install-action@v2
@@ -218,7 +226,8 @@ jobs:
       - name: Fuzz each target (60s)
         run: |
           for t in dot_diff l2_l1_diff slot_diff; do
-            cargo +nightly fuzz run "$t" -- -max_total_time=60 -max_len=8192
+            cargo +nightly fuzz run "$t" --target x86_64-unknown-linux-gnu -- \
+              -max_total_time=60 -max_len=8192
           done
 
   # Property tests with extended iterations

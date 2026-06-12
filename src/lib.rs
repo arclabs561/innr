@@ -94,10 +94,10 @@ pub mod binary;
 /// Dense vector primitives: dot, cosine, norm, L2/L1 distance, matryoshka.
 pub mod dense;
 
-/// Portable `f64` vector primitives for higher-precision consumers
-/// (scientific computing, PageRank-style accumulation, statistical reductions).
-/// Mirrors the `f32` API in [`dense`]; portable-only -- SIMD acceleration is
-/// a follow-up.
+/// `f64` vector primitives for higher-precision consumers (scientific
+/// computing, PageRank-style accumulation, statistical reductions). Mirrors
+/// the `f32` API in [`dense`]; the reductions dispatch to SIMD (AVX-512 / AVX2
+/// / NEON) with a portable fallback.
 pub mod dense_f64;
 
 /// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).

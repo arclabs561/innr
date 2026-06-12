@@ -636,6 +636,28 @@ pub unsafe fn slot_hamming_u32_neon(a: &[u32], b: &[u32]) -> u32 {
 // down; 4-way unrolled = 8 doubles per iteration.
 // ---------------------------------------------------------------------------
 
+/// Count differing u16 slots (8 per q-register). b-bit MinHash at b=16.
+#[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u16_neon(a: &[u16], b: &[u16]) -> u32 {
+    use std::arch::aarch64::{vaddvq_u16, vceqq_u16, vld1q_u16, vshrq_n_u16};
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks8 = n / 8;
+    let mut equal: u32 = 0;
+    for i in 0..chunks8 {
+        let base = i * 8;
+        // vceqq sets all-ones per equal lane; >>15 maps to 0/1, then sum.
+        let eq = vceqq_u16(vld1q_u16(ap.add(base)), vld1q_u16(bp.add(base)));
+        equal += u32::from(vaddvq_u16(vshrq_n_u16::<15>(eq)));
+    }
+    let mut diff = (chunks8 as u32) * 8 - equal;
+    for i in (chunks8 * 8)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
 /// Count differing u64 slots (2 per q-register).
 #[target_feature(enable = "neon")]
 #[allow(unsafe_code)]

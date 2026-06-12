@@ -1337,6 +1337,58 @@ pub unsafe fn slot_hamming_u32_avx2(a: &[u32], b: &[u32]) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// u16 integer-slot Hamming: count differing u16 slots (b-bit MinHash at b=16,
+// the SIMD-friendly truncation width). AVX-512BW: 32 slots/zmm via epi16 mask;
+// AVX2: 16/ymm via epi16 compare + movemask_epi8 (2 mask bits per lane).
+// ---------------------------------------------------------------------------
+
+#[target_feature(enable = "avx512f,avx512bw")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u16_avx512(a: &[u16], b: &[u16]) -> u32 {
+    use std::arch::x86_64::{_mm512_cmpeq_epi16_mask, _mm512_loadu_si512};
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks32 = n / 32;
+    let mut diff: u32 = 0;
+    for i in 0..chunks32 {
+        let base = i * 32;
+        let va = _mm512_loadu_si512(ap.add(base) as *const _);
+        let vb = _mm512_loadu_si512(bp.add(base) as *const _);
+        // __mmask32: bit j = lane j equal; differing = 32 - popcount.
+        diff += 32 - _mm512_cmpeq_epi16_mask(va, vb).count_ones();
+    }
+    for i in (chunks32 * 32)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_code)]
+pub unsafe fn slot_hamming_u16_avx2(a: &[u16], b: &[u16]) -> u32 {
+    use std::arch::x86_64::{
+        __m256i, _mm256_cmpeq_epi16, _mm256_loadu_si256, _mm256_movemask_epi8,
+    };
+    let n = a.len().min(b.len());
+    let (ap, bp) = (a.as_ptr(), b.as_ptr());
+    let chunks16 = n / 16;
+    let mut diff: u32 = 0;
+    for i in 0..chunks16 {
+        let base = i * 16;
+        let va = _mm256_loadu_si256(ap.add(base) as *const __m256i);
+        let vb = _mm256_loadu_si256(bp.add(base) as *const __m256i);
+        // Each equal epi16 lane sets 2 bits in the byte movemask, so
+        // equal lanes = popcount / 2; differing = 16 - equal.
+        let eq_bytes = (_mm256_movemask_epi8(_mm256_cmpeq_epi16(va, vb)) as u32).count_ones();
+        diff += 16 - eq_bytes / 2;
+    }
+    for i in (chunks16 * 16)..n {
+        diff += u32::from(*a.get_unchecked(i) != *b.get_unchecked(i));
+    }
+    diff
+}
+
+// ---------------------------------------------------------------------------
 // u64 integer-slot Hamming: count differing u64 slots (probminhash u64
 // sketches). AVX-512: 8 slots/zmm via epi64 mask compare; AVX2: 4/ymm via
 // epi64 compare + movemask_pd. Mirror slot_hamming_u32.

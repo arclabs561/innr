@@ -170,8 +170,8 @@ pub fn maxsim_cosine(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
         return 0.0;
     }
 
-    // Same dimension pre-checks as `maxsim`: without them a mismatch
-    // panics deep inside `cosine` with an unrelated message.
+    // Pre-check dims like maxsim: else a mismatch panics inside cosine with
+    // an unrelated message.
     let dim = query_tokens[0].len();
     assert!(
         query_tokens.iter().all(|t| t.len() == dim),

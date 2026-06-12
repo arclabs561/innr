@@ -1,0 +1,36 @@
+name: mutation
+
+# Weekly, not per-PR: cargo-mutants is slow (each mutant rebuilds + reruns the
+# suite). This measures whether the differential/property oracles would
+# actually catch an introduced bug, and opens an issue on regression.
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: Mutation test core modules
+        # Scope to the contract-bearing kernels; a full-crate run exceeds the
+        # weekly budget. --in-place is fine on a throwaway runner.
+        run: |
+          cargo mutants --in-place --no-shuffle \
+            -f src/dense.rs -f src/dense_f64.rs -f src/slot.rs \
+            -f src/distance.rs -f src/maxsim.rs \
+            -- --all-features
+      - name: Upload outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out
+          path: mutants.out/

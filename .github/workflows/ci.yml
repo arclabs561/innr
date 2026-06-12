@@ -202,6 +202,25 @@ jobs:
           # unsafe inside safe fns; default features leave it uncompiled.
           cargo miri test --lib --features sparse -- --skip simd
 
+  # Differential fuzz smoke: build the harnesses and fuzz each briefly with
+  # ASAN. The full corpus runs out-of-band; this gates that the targets build
+  # and survive a short adversarial burst (the kernels' main risk surface).
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Fuzz each target (60s)
+        run: |
+          for t in dot_diff l2_l1_diff slot_diff; do
+            cargo +nightly fuzz run "$t" -- -max_total_time=60 -max_len=8192
+          done
+
   # Property tests with extended iterations
   property-tests:
     runs-on: ubuntu-latest

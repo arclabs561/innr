@@ -29,6 +29,7 @@ const MIN_DIM_SIMD_F64: usize = 8;
 #[must_use]
 #[allow(unsafe_code)]
 pub fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
     #[cfg(target_arch = "x86_64")]
     {
@@ -145,6 +146,7 @@ pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn l2_distance_squared_f64(a: &[f64], b: &[f64]) -> f64 {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
     #[cfg(target_arch = "x86_64")]
     {
@@ -224,6 +226,7 @@ pub fn l2_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn l1_distance_f64(a: &[f64], b: &[f64]) -> f64 {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
     #[cfg(target_arch = "x86_64")]
     {

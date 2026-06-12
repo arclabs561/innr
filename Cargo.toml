@@ -65,6 +65,10 @@ name = "dense"
 harness = false
 
 [[bench]]
+name = "dense_f64"
+harness = false
+
+[[bench]]
 name = "sparse"
 harness = false
 

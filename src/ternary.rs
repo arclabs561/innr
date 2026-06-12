@@ -198,7 +198,11 @@ pub fn encode_ternary(values: &[f32], threshold: f32) -> PackedTernary {
 #[must_use]
 #[allow(unsafe_code)]
 pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
-    assert_eq!(a.dimension, b.dimension);
+    assert_eq!(
+        a.dimension, b.dimension,
+        "innr::ternary_dot: dimension mismatch ({} vs {})",
+        a.dimension, b.dimension
+    );
     assert_eq!(a.data.len(), b.data.len());
 
     #[cfg(target_arch = "x86_64")]

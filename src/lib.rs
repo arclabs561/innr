@@ -27,7 +27,23 @@
 //! | aarch64 | NEON | Always available |
 //! | Other | Portable | LLVM auto-vectorizes |
 //!
-//! Vectors shorter than 16 dimensions use portable code (SIMD overhead not worthwhile).
+//! Short vectors use portable code (SIMD overhead not worthwhile); the
+//! threshold is per module: 16 dimensions for dense f32 ops, 32 for the
+//! quantized `u8` ops, 8 for integer-slot ops.
+//!
+//! # Contracts
+//!
+//! - **Length mismatch**: the dispatching functions (`dot`, `cosine`,
+//!   `l1_distance`, `l2_distance`, `dot_u8`, `hamming_distance`,
+//!   `slot_hamming_u32`, `maxsim`, ...) panic. The `*_portable` variants
+//!   and the `dense_f64` module compare over the shorter length; each such
+//!   function documents this.
+//! - **Zero norms**: similarity functions return `0.0` when either norm is
+//!   below `1e-9` (compared in squared space against `NORM_EPSILON_SQ`).
+//! - **NaN**: propagates through `dot`/distances; `cosine` returns `0.0`
+//!   for NaN inputs because the zero-norm guard absorbs them.
+//! - **Empty inputs**: reductions return `0.0`; `minhash_jaccard` of two
+//!   empty sketches returns `1.0`.
 //!
 //! # Historical Context
 //!

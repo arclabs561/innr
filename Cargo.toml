@@ -23,6 +23,11 @@ include = [
 
 [workspace]
 
+[package.metadata.docs.rs]
+# Build with every feature so sparse_ext and the anndists impls are
+# visible on docs.rs (they are README-advertised).
+all-features = true
+
 [features]
 default = []
 sparse = []

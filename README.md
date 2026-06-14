@@ -71,7 +71,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Late interaction**: `maxsim`, `maxsim_cosine` (ColBERT-style), `sparse_maxsim` (sparse late interaction).
 
-**Integer-slot Hamming / MinHash**: `slot_hamming_u32` and `slot_hamming_u64` (SIMD-dispatched differing-slot count; the u64 path suits probminhash-style 64-bit sketches), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form).
+**Integer-slot Hamming / MinHash**: `slot_hamming_u16`, `slot_hamming_u32`, and `slot_hamming_u64` (SIMD-dispatched differing-slot count; u16 suits b-bit MinHash at b=16, the u64 path suits probminhash-style 64-bit sketches), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form), `slot_compare_counts` (the `(eq, lt, gt)` per-position triple in `SlotCounts`, for SetSketch / UltraLogLog joint estimators that need the `lt`/`gt` counts, not just `eq`).
 
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 

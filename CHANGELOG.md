@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+Additive release. One new primitive plus README coverage for kernels that
+already shipped.
+
+- `slot_compare_counts`: the `(eq, lt, gt)` per-position comparison triple (returned as `SlotCounts`), generalizing `slot_hamming` (which is `len - eq`). SetSketch (Ertl 2021) and UltraLogLog (Ertl 2024) joint Jaccard/cardinality estimators consume the `lt`/`gt` counts, not just `eq`; innr returns the metric-agnostic triple and leaves the estimator to the consuming sketch crate. Portable and generic over `T: Ord`; a SIMD specialization is deferred until a consumer profiles it. Neither anndists nor simsimd exposes this triple.
+- Docs: the README now lists `slot_hamming_u16` (b-bit MinHash at b=16) and `slot_compare_counts`, both exported since their respective releases but previously undocumented in the API summary.
+
 ## 0.6.1
 
 Additive release. New SIMD kernels, introspection, and a substantially

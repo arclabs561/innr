@@ -52,6 +52,13 @@ jobs:
       - name: Test
         run: cargo test --all-features
 
+      - name: Run example assertions
+        run: |
+          cargo run --example 01_basic_ops --all-features
+          cargo run --example batch_demo --all-features
+          cargo run --example binary_demo --all-features
+          cargo run --example maxsim_colbert --all-features
+
       - name: Benchmarks compile
         run: cargo build --benches --all-features
 

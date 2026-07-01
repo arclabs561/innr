@@ -75,10 +75,11 @@ Batch kNN over a corpus?
   --> VerticalBatch + batch_knn (batch_demo)
 ```
 
-## Key Insight: Distance Is the Bottleneck
+## Distance Cost
 
 In HNSW search: ~20 hops x 32 neighbors = 640 distance calls per query.
-A 3x speedup in distance computation = 3x faster search.
+Distance-kernel improvements matter most when distance calls dominate query
+time.
 
 | Operation | Standard | Accelerated | Typical Speedup |
 |-----------|----------|-------------|-----------------|

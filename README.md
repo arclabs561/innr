@@ -13,7 +13,7 @@ with scalar fallback.
 
 ```toml
 [dependencies]
-innr = "0.6.2"
+innr = "0.6.3"
 ```
 
 ```rust
@@ -76,7 +76,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 
 ```toml
-innr = { version = "0.6.2", features = ["anndists"] }
+innr = { version = "0.6.3", features = ["anndists"] }
 ```
 
 ```rust

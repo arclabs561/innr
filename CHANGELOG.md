@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.3
 
 - `scalar::mixed_dot_u8_f32`: public SIMD-dispatched f32-by-u8 inner product
   for callers that own their own affine correction terms.

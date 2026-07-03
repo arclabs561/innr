@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `batch_l2_squared_into`, `batch_dot_into`, `batch_norms_into`, and
+  `batch_cosine_into`: reusable-output variants for `VerticalBatch` scans.
+  These preserve the allocating APIs while letting repeated-query callers keep
+  distance/score buffers across scans.
+
 ## 0.6.2
 
 Additive release. One new primitive plus README coverage for kernels that

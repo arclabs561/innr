@@ -3,9 +3,9 @@
 //! Tests the PDX-style columnar layout and batch distance computations.
 
 use innr::batch::{
-    batch_cosine, batch_dot, batch_knn, batch_knn_adaptive, batch_knn_cosine, batch_knn_dot,
-    batch_knn_filtered, batch_knn_reordered, batch_l2_squared, batch_l2_squared_pruning,
-    batch_norms, VerticalBatch,
+    batch_cosine, batch_cosine_into, batch_dot, batch_dot_into, batch_knn, batch_knn_adaptive,
+    batch_knn_cosine, batch_knn_dot, batch_knn_filtered, batch_knn_reordered, batch_l2_squared,
+    batch_l2_squared_into, batch_l2_squared_pruning, batch_norms, batch_norms_into, VerticalBatch,
 };
 
 // =============================================================================
@@ -183,6 +183,33 @@ fn cosine_normalized() {
         "Opposite: {}",
         cosines[3]
     );
+}
+
+#[test]
+fn into_batch_outputs_match_allocating_apis() {
+    let vectors = vec![
+        vec![1.0, 0.0, 0.0],
+        vec![0.0, 1.0, 0.0],
+        vec![1.0, 1.0, 0.0],
+    ];
+    let batch = VerticalBatch::from_rows(&vectors);
+    let query = vec![1.0, 0.5, 0.0];
+
+    let mut out = Vec::with_capacity(8);
+
+    batch_l2_squared_into(&query, &batch, &mut out);
+    assert_eq!(out, batch_l2_squared(&query, &batch));
+
+    batch_dot_into(&query, &batch, &mut out);
+    assert_eq!(out, batch_dot(&query, &batch));
+
+    let norms = batch_norms(&batch);
+    let mut norms_into = Vec::with_capacity(8);
+    batch_norms_into(&batch, &mut norms_into);
+    assert_eq!(norms_into, norms);
+
+    batch_cosine_into(&query, &batch, &norms, &mut out);
+    assert_eq!(out, batch_cosine(&query, &batch, &norms));
 }
 
 // =============================================================================

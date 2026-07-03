@@ -3,8 +3,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use innr::batch::{
-    batch_cosine, batch_dot, batch_knn, batch_knn_cosine, batch_l2_squared, batch_norms,
-    VerticalBatch,
+    batch_cosine, batch_cosine_into, batch_dot, batch_dot_into, batch_knn, batch_knn_cosine,
+    batch_l2_squared, batch_l2_squared_into, batch_norms, VerticalBatch,
 };
 use rand::prelude::*;
 
@@ -30,9 +30,19 @@ fn bench_batch_l2(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements((n * dim) as u64));
         group.bench_with_input(
-            BenchmarkId::new("l2_squared", format!("{n}x{dim}")),
+            BenchmarkId::new("l2_squared_alloc", format!("{n}x{dim}")),
             &(),
             |bench, _| bench.iter(|| batch_l2_squared(black_box(&query), black_box(&batch))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("l2_squared_into", format!("{n}x{dim}")),
+            &(),
+            |bench, _| {
+                let mut out = Vec::with_capacity(n);
+                bench.iter(|| {
+                    batch_l2_squared_into(black_box(&query), black_box(&batch), black_box(&mut out))
+                });
+            },
         );
     }
 
@@ -49,9 +59,19 @@ fn bench_batch_dot(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements((n * dim) as u64));
         group.bench_with_input(
-            BenchmarkId::new("dot", format!("{n}x{dim}")),
+            BenchmarkId::new("dot_alloc", format!("{n}x{dim}")),
             &(),
             |bench, _| bench.iter(|| batch_dot(black_box(&query), black_box(&batch))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("dot_into", format!("{n}x{dim}")),
+            &(),
+            |bench, _| {
+                let mut out = Vec::with_capacity(n);
+                bench.iter(|| {
+                    batch_dot_into(black_box(&query), black_box(&batch), black_box(&mut out))
+                });
+            },
         );
     }
 
@@ -69,10 +89,25 @@ fn bench_batch_cosine(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements((n * dim) as u64));
         group.bench_with_input(
-            BenchmarkId::new("cosine", format!("{n}x{dim}")),
+            BenchmarkId::new("cosine_alloc", format!("{n}x{dim}")),
             &(),
             |bench, _| {
                 bench.iter(|| batch_cosine(black_box(&query), black_box(&batch), black_box(&norms)))
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("cosine_into", format!("{n}x{dim}")),
+            &(),
+            |bench, _| {
+                let mut out = Vec::with_capacity(n);
+                bench.iter(|| {
+                    batch_cosine_into(
+                        black_box(&query),
+                        black_box(&batch),
+                        black_box(&norms),
+                        black_box(&mut out),
+                    )
+                });
             },
         );
     }

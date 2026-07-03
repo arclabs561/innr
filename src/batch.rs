@@ -234,9 +234,24 @@ impl VerticalBatch {
 /// This processes memory sequentially and auto-vectorizes well.
 #[must_use]
 pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
+    let mut distances = Vec::with_capacity(batch.num_vectors);
+    batch_l2_squared_into(query, batch, &mut distances);
+    distances
+}
+
+/// Compute squared L2 distances from `query` to all vectors in `batch`, reusing
+/// `distances` across repeated scans.
+///
+/// Clears `distances` before writing one value per vector.
+///
+/// # Panics
+///
+/// Panics if `query.len() != batch.dimension()`.
+pub fn batch_l2_squared_into(query: &[f32], batch: &VerticalBatch, distances: &mut Vec<f32>) {
     assert_eq!(query.len(), batch.dimension);
 
-    let mut distances = vec![0.0f32; batch.num_vectors];
+    distances.clear();
+    distances.resize(batch.num_vectors, 0.0);
 
     // Process dimension-by-dimension (the key insight)
     for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
@@ -248,16 +263,29 @@ pub fn batch_l2_squared(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
             *dist += diff * diff;
         }
     }
-
-    distances
 }
 
 /// Compute dot products from query to all vectors in batch.
 #[must_use]
 pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
+    let mut products = Vec::with_capacity(batch.num_vectors);
+    batch_dot_into(query, batch, &mut products);
+    products
+}
+
+/// Compute dot products from `query` to all vectors in `batch`, reusing
+/// `products` across repeated scans.
+///
+/// Clears `products` before writing one value per vector.
+///
+/// # Panics
+///
+/// Panics if `query.len() != batch.dimension()`.
+pub fn batch_dot_into(query: &[f32], batch: &VerticalBatch, products: &mut Vec<f32>) {
     assert_eq!(query.len(), batch.dimension);
 
-    let mut products = vec![0.0f32; batch.num_vectors];
+    products.clear();
+    products.resize(batch.num_vectors, 0.0);
 
     for (d, &q_d) in query.iter().enumerate().take(batch.dimension) {
         let dim_slice = batch.dimension_slice(d);
@@ -266,8 +294,6 @@ pub fn batch_dot(query: &[f32], batch: &VerticalBatch) -> Vec<f32> {
             *prod += q_d * v_d;
         }
     }
-
-    products
 }
 
 /// Compute squared L2 distances with early termination.
@@ -624,7 +650,17 @@ pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> Ba
 /// Norms for batch of vectors (precomputed for cosine distance).
 #[must_use]
 pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
-    let mut norms = vec![0.0f32; batch.num_vectors];
+    let mut norms = Vec::with_capacity(batch.num_vectors);
+    batch_norms_into(batch, &mut norms);
+    norms
+}
+
+/// Compute vector norms for `batch`, reusing `norms` across repeated calls.
+///
+/// Clears `norms` before writing one value per vector.
+pub fn batch_norms_into(batch: &VerticalBatch, norms: &mut Vec<f32>) {
+    norms.clear();
+    norms.resize(batch.num_vectors, 0.0);
 
     for d in 0..batch.dimension {
         let dim_slice = batch.dimension_slice(d);
@@ -633,35 +669,51 @@ pub fn batch_norms(batch: &VerticalBatch) -> Vec<f32> {
         }
     }
 
-    for norm in &mut norms {
+    for norm in norms.iter_mut() {
         *norm = norm.sqrt();
     }
-
-    norms
 }
 
 /// Compute cosine similarities from query to all vectors.
 #[must_use]
 pub fn batch_cosine(query: &[f32], batch: &VerticalBatch, norms: &[f32]) -> Vec<f32> {
+    let mut cosines = Vec::with_capacity(batch.num_vectors);
+    batch_cosine_into(query, batch, norms, &mut cosines);
+    cosines
+}
+
+/// Compute cosine similarities from `query` to all vectors, reusing `cosines`
+/// across repeated scans.
+///
+/// Clears `cosines` before writing one value per vector.
+///
+/// # Panics
+///
+/// Panics if `query.len() != batch.dimension()` or if `norms.len()` does not
+/// match the number of vectors in `batch`.
+pub fn batch_cosine_into(
+    query: &[f32],
+    batch: &VerticalBatch,
+    norms: &[f32],
+    cosines: &mut Vec<f32>,
+) {
     assert_eq!(norms.len(), batch.num_vectors);
 
-    let dots = batch_dot(query, batch);
+    batch_dot_into(query, batch, cosines);
     let query_norm: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
 
     if query_norm < crate::NORM_EPSILON {
-        return vec![0.0; batch.num_vectors];
+        cosines.fill(0.0);
+        return;
     }
 
-    dots.into_iter()
-        .zip(norms.iter())
-        .map(|(dot, &norm)| {
-            if norm > crate::NORM_EPSILON {
-                dot / (query_norm * norm)
-            } else {
-                0.0
-            }
-        })
-        .collect()
+    for (cosine, &norm) in cosines.iter_mut().zip(norms.iter()) {
+        *cosine = if norm > crate::NORM_EPSILON {
+            *cosine / (query_norm * norm)
+        } else {
+            0.0
+        };
+    }
 }
 
 /// Find k vectors with highest dot product (maximum inner product search).
@@ -852,6 +904,15 @@ mod tests {
         assert!((distances[0] - 2.0).abs() < 1e-6); // sqrt(2)^2 = 2
         assert!((distances[1] - 1.0).abs() < 1e-6); // dist to (1,0,0) = 1
         assert!((distances[2] - 1.0).abs() < 1e-6); // dist to (0,1,0) = 1
+
+        let mut into = Vec::with_capacity(8);
+        let capacity = into.capacity();
+        batch_l2_squared_into(&query, &batch, &mut into);
+        assert_eq!(into, distances);
+        assert!(
+            into.capacity() >= capacity,
+            "caller-provided allocation should be reused"
+        );
     }
 
     #[test]
@@ -865,6 +926,15 @@ mod tests {
         assert!((dots[0] - 1.0).abs() < 1e-6); // 1*1 + 0*2 = 1
         assert!((dots[1] - 2.0).abs() < 1e-6); // 0*1 + 1*2 = 2
         assert!((dots[2] - 3.0).abs() < 1e-6); // 1*1 + 1*2 = 3
+
+        let mut into = Vec::with_capacity(8);
+        let capacity = into.capacity();
+        batch_dot_into(&query, &batch, &mut into);
+        assert_eq!(into, dots);
+        assert!(
+            into.capacity() >= capacity,
+            "caller-provided allocation should be reused"
+        );
     }
 
     #[test]
@@ -927,6 +997,15 @@ mod tests {
         assert!((cosines[0] - 1.0).abs() < 1e-6); // Parallel
         assert!(cosines[1].abs() < 1e-6); // Orthogonal
         assert!((cosines[2] - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01); // 45 degrees
+
+        let mut into = Vec::with_capacity(8);
+        let capacity = into.capacity();
+        batch_cosine_into(&query, &batch, &norms, &mut into);
+        assert_eq!(into, cosines);
+        assert!(
+            into.capacity() >= capacity,
+            "caller-provided allocation should be reused"
+        );
     }
 
     // =========================================================================
@@ -1016,6 +1095,15 @@ mod tests {
         assert!((norms[0] - 5.0).abs() < 1e-6); // sqrt(9+16)
         assert!(norms[1].abs() < 1e-6); // zero vector
         assert!((norms[2] - 1.0).abs() < 1e-6); // unit vector
+
+        let mut into = Vec::with_capacity(8);
+        let capacity = into.capacity();
+        batch_norms_into(&batch, &mut into);
+        assert_eq!(into, norms);
+        assert!(
+            into.capacity() >= capacity,
+            "caller-provided allocation should be reused"
+        );
     }
 
     // =========================================================================

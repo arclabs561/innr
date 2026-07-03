@@ -295,16 +295,36 @@ pub fn asymmetric_dot_u8_precomputed(
         quantized.dimension
     );
 
-    let mixed = mixed_dot_u8_f32(query, &quantized.data);
+    let mixed = mixed_dot_u8_f32_dispatch(query, &quantized.data);
     (params.alpha / 255.0) * mixed + params.offset * ctx.query_sum
 }
 
 /// Mixed-precision dot product: `sum(a_f32[i] * b_u8[i] as f32)`.
 ///
-/// This is the hot inner loop. SIMD-dispatched.
+/// This is the raw f32-query by u8-code inner loop used by asymmetric scalar
+/// quantization. It is useful when callers own the affine correction terms
+/// outside `innr`, for example per-vector quantizers.
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
+#[must_use]
 #[inline]
 #[allow(unsafe_code)]
-fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
+pub fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "mixed_dot_u8_f32: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    mixed_dot_u8_f32_dispatch(a, b)
+}
+
+#[inline]
+#[allow(unsafe_code)]
+fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len().min(b.len());
 
@@ -440,6 +460,25 @@ mod tests {
             (direct - precomputed).abs() < 1e-6,
             "precomputed mismatch: direct={direct}, precomputed={precomputed}"
         );
+    }
+
+    #[test]
+    fn test_mixed_dot_u8_f32_exact() {
+        let query = [0.5f32, -2.0, 3.0, 4.5];
+        let codes = [2u8, 7, 11, 13];
+        let expected: f32 = query
+            .iter()
+            .zip(codes.iter())
+            .map(|(&q, &c)| q * c as f32)
+            .sum();
+
+        assert_eq!(mixed_dot_u8_f32(&query, &codes), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "mixed_dot_u8_f32: slice length mismatch")]
+    fn mixed_dot_u8_f32_panics_on_length_mismatch() {
+        let _ = mixed_dot_u8_f32(&[1.0, 2.0], &[1]);
     }
 
     #[test]

@@ -61,7 +61,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Ternary quantization (1.58-bit)**: `ternary::encode_ternary` to {-1, 0, +1}, `ternary_dot`, `ternary_hamming`, `asymmetric_dot` (float query x ternary doc). 16-20x compression.
 
-**Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`. Batch search via `batch_knn_u8`. 4x compression.
+**Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`; raw f32-by-u8 inner loop via `mixed_dot_u8_f32`. Batch search via `batch_knn_u8`. 4x compression.
 
 **Fast approximate math**: `fast_cosine_dispatch` (SIMD-dispatched), `fast_cosine` (portable Quake III), `fast_rsqrt`, `fast_rsqrt_precise`.
 

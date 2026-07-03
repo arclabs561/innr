@@ -357,34 +357,31 @@ fn simd_correctness_l1_across_boundaries() {
 }
 
 // =============================================================================
-// mixed f32 x u8 dot: exact recovery with identity quantization params.
+// mixed f32 x u8 dot: exact inner-loop coverage.
 // The SIMD kernels were previously tested only through quantization-scale
 // tolerances, which would mask a sub-tolerance kernel bug.
 // =============================================================================
 
 #[test]
 fn simd_correctness_mixed_dot_exact() {
-    use innr::scalar::{asymmetric_dot_u8, quantize_u8, QuantizationParams};
-    // alpha = 255, offset = 0 makes dequantization the identity:
-    // result = (alpha/255) * mixed_dot + offset * query_sum = mixed_dot.
-    let params = QuantizationParams {
-        alpha: 255.0,
-        offset: 0.0,
-    };
+    use innr::scalar::mixed_dot_u8_f32;
     for dim in [8, 16, 31, 32, 33, 64, 65, 128] {
         for seed in 0..5_u64 {
             // u8 corpus values and small-integer f32 queries: every product
             // and partial sum is exactly representable in f32, so the SIMD
             // kernel must match the reference bit-for-bit.
-            let corpus: Vec<f32> = (0..dim)
-                .map(|i| ((i as u64 * 31 + seed * 7) % 256) as f32)
+            let corpus: Vec<u8> = (0..dim)
+                .map(|i| ((i as u64 * 31 + seed * 7) % 256) as u8)
                 .collect();
             let query: Vec<f32> = (0..dim)
                 .map(|i| ((i as u64 * 13 + seed * 3) % 8) as f32)
                 .collect();
-            let qz = quantize_u8(&corpus, &params);
-            let expect: f32 = query.iter().zip(corpus.iter()).map(|(x, y)| x * y).sum();
-            let got = asymmetric_dot_u8(&query, &qz, &params);
+            let expect: f32 = query
+                .iter()
+                .zip(corpus.iter())
+                .map(|(&x, &y)| x * y as f32)
+                .sum();
+            let got = mixed_dot_u8_f32(&query, &corpus);
             assert_eq!(got, expect, "mixed dot mismatch at dim={dim}, seed={seed}");
         }
     }

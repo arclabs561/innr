@@ -4,7 +4,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use innr::{
     binary::encode_binary, cosine, dot, dot_u8, hamming_distance, l1_distance, l2_distance, norm,
-    TopK,
+    scalar::mixed_dot_u8_f32, TopK,
 };
 use rand::prelude::*;
 
@@ -129,6 +129,22 @@ fn bench_dot_u8(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_mixed_dot_u8_f32(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mixed_dot_u8_f32");
+
+    for len in [128usize, 768] {
+        let a = random_vec(len);
+        let b = random_u8_vec(len);
+
+        group.throughput(Throughput::Elements(len as u64));
+        group.bench_with_input(BenchmarkId::new("mixed_dot", len), &len, |bench, _| {
+            bench.iter(|| mixed_dot_u8_f32(black_box(&a), black_box(&b)))
+        });
+    }
+
+    group.finish();
+}
+
 fn bench_binary(c: &mut Criterion) {
     let mut group = c.benchmark_group("binary");
 
@@ -181,6 +197,7 @@ criterion_group!(
     bench_l1_distance,
     bench_hamming_distance,
     bench_dot_u8,
+    bench_mixed_dot_u8_f32,
     bench_binary,
     bench_topk,
 );

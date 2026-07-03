@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `scalar::mixed_dot_u8_f32`: public SIMD-dispatched f32-by-u8 inner product
+  for callers that own their own affine correction terms.
 - `batch_l2_squared_into`, `batch_dot_into`, `batch_norms_into`, and
   `batch_cosine_into`: reusable-output variants for `VerticalBatch` scans.
   These preserve the allocating APIs while letting repeated-query callers keep

@@ -13,7 +13,7 @@ with scalar fallback.
 
 ```toml
 [dependencies]
-innr = "0.6"
+innr = "0.6.2"
 ```
 
 ```rust
@@ -51,11 +51,11 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Core (f32)**: `dot`, `cosine`, `norm`, `l2_distance`, `l2_distance_squared`, `l1_distance`, `angular_distance`, `normalize`, `normalize_with_norm` (normalize in place, returns the original norm). Portable fallbacks in `innr::dense` (e.g. `dot_portable`).
 
-**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}` -- SIMD-dispatched (AVX-512/AVX2/NEON) with exact FMA accumulation, for iterative-solver residuals and statistical reductions.
+**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}`: SIMD-dispatched (AVX-512/AVX2/NEON) with exact FMA accumulation, for iterative-solver residuals and statistical reductions.
 
 **Backend introspection**: `innr::backend::{dense_backend, slot_backend}` report which kernel family (`Avx512` / `Avx2Fma` / `Neon` / `Portable`) a given length dispatches to on this machine.
 
-**Matryoshka**: `matryoshka_dot`, `matryoshka_cosine` -- similarity on a prefix of the embedding.
+**Matryoshka**: `matryoshka_dot`, `matryoshka_cosine`: similarity on a prefix of the embedding.
 
 **Binary quantization (1-bit)**: `encode_binary` to packed bits, `binary_dot`, `binary_hamming`, `binary_jaccard`. 32x memory reduction over f32.
 
@@ -76,7 +76,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 
 ```toml
-innr = { version = "0.6", features = ["anndists"] }
+innr = { version = "0.6.2", features = ["anndists"] }
 ```
 
 ```rust
@@ -120,21 +120,21 @@ cargo bench
 
 ## Examples
 
-[**01_basic_ops.rs**](examples/01_basic_ops.rs) -- Core similarity metrics and their mathematical relationships. Proves `L2^2(a,b) = 2(1 - cosine(a,b))` for normalized vectors.
+[**01_basic_ops.rs**](examples/01_basic_ops.rs): Core similarity metrics and their mathematical relationships. Proves `L2^2(a,b) = 2(1 - cosine(a,b))` for normalized vectors.
 
-[**batch_demo.rs**](examples/batch_demo.rs) -- PDX-style columnar layout for batch retrieval. Transposes 10K vectors (128d), runs 100 queries, verifies k-NN against brute-force.
+[**batch_demo.rs**](examples/batch_demo.rs): PDX-style columnar layout for batch retrieval. Transposes 10K vectors (128d), runs 100 queries, verifies k-NN against brute-force.
 
-[**binary_demo.rs**](examples/binary_demo.rs) -- Binary quantization for first-stage retrieval. 32x memory reduction, measures recall@10 against full-precision search.
+[**binary_demo.rs**](examples/binary_demo.rs): Binary quantization for first-stage retrieval. 32x memory reduction, measures recall@10 against full-precision search.
 
 More in [`examples/`](examples/):
 
-[**fast_math_demo.rs**](examples/fast_math_demo.rs) -- Newton-Raphson `rsqrt` for 3-10x faster cosine, the speed/accuracy trade-off for first-stage scoring.
+[**fast_math_demo.rs**](examples/fast_math_demo.rs): Newton-Raphson `rsqrt` for 3-10x faster cosine, the speed/accuracy trade-off for first-stage scoring.
 
-[**matryoshka_search.rs**](examples/matryoshka_search.rs) -- MRL progressive search: a coarse pass on a 128d prefix, then a fine pass at full 768d, the cheap-then-precise pattern for large indexes.
+[**matryoshka_search.rs**](examples/matryoshka_search.rs): MRL progressive search: a coarse pass on a 128d prefix, then a fine pass at full 768d, the cheap-then-precise pattern for large indexes.
 
-[**maxsim_colbert.rs**](examples/maxsim_colbert.rs) -- ColBERT-style MaxSim late interaction, the per-token scoring multi-vector rerankers use.
+[**maxsim_colbert.rs**](examples/maxsim_colbert.rs): ColBERT-style MaxSim late interaction, the per-token scoring multi-vector rerankers use.
 
-[**ternary_demo.rs**](examples/ternary_demo.rs) -- 1.58-bit ternary quantization: 16x memory and ~18x speed, with the recall trade-off measured.
+[**ternary_demo.rs**](examples/ternary_demo.rs): 1.58-bit ternary quantization: 16x memory and ~18x speed, with the recall trade-off measured.
 
 ## Tests
 

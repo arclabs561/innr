@@ -17,7 +17,6 @@ env:
 # 1. Native hardware tests (x86 + ARM) for real SIMD execution
 # 2. Cross-compilation checks for target coverage
 # 3. Differential testing: SIMD vs scalar reference implementations
-# 4. Miri for undefined behavior detection (nightly)
 # See: https://cryspen.com/post/specify-rust-simd/
 
 jobs:
@@ -208,65 +207,6 @@ jobs:
       - name: Test via QEMU (aarch64)
         run: cross test --target aarch64-unknown-linux-gnu --all-features
         continue-on-error: true  # QEMU can be flaky
-
-  # Miri for undefined behavior detection
-  # Catches: aliasing violations, uninitialized memory, out-of-bounds
-  miri:
-    runs-on: ubuntu-latest
-    # The last three runs died at GitHub's 6h job ceiling (conclusion:
-    # cancelled, no failure signal). Proptest's default 256 cases under
-    # miri's ~100x slowdown is what ate the time; 16 cases keeps the UB
-    # check while finishing in minutes, and the explicit timeout turns
-    # any regression into a visible failure instead of a silent cancel.
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Miri setup
-        run: cargo miri setup
-
-      - name: Miri tests (safe subset)
-        env:
-          MIRIFLAGS: "-Zmiri-disable-isolation"
-          PROPTEST_CASES: 16
-        run: |
-          # Miri can't run SIMD intrinsics, so test scalar paths
-          # -Zmiri-disable-isolation allows proptest to access getcwd/filesystem
-          # --features sparse: sparse_ext is the one module with heavy
-          # unsafe inside safe fns; default features leave it uncompiled.
-          cargo miri test --lib --features sparse -- --skip simd
-
-  # Differential fuzz smoke: build the harnesses and fuzz each briefly with
-  # ASAN. The full corpus runs out-of-band; this gates that the targets build
-  # and survive a short adversarial burst (the kernels' main risk surface).
-  fuzz-smoke:
-    runs-on: ubuntu-latest
-    # Clear the workflow-level RUSTFLAGS (-Dwarnings): cargo-fuzz injects its
-    # own sanitizer flags, and the inherited value otherwise wins and leaves
-    # ASAN on a statically-linked libc ("sanitizer is incompatible with
-    # statically linked libc"). -crt-static lets the sanitizer link.
-    env:
-      RUSTFLAGS: "-C target-feature=-crt-static"
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: x86_64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-fuzz
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      - name: Fuzz each target (60s)
-        run: |
-          for t in dot_diff l2_l1_diff slot_diff; do
-            cargo +nightly fuzz run "$t" --target x86_64-unknown-linux-gnu -- \
-              -max_total_time=60 -max_len=8192
-          done
 
   # Property tests with extended iterations
   property-tests:

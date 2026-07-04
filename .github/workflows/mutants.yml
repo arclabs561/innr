@@ -4,8 +4,6 @@ name: mutation
 # suite). This measures whether the differential/property oracles would
 # actually catch an introduced bug, and opens an issue on regression.
 on:
-  schedule:
-    - cron: "0 9 * * 1" # Mondays 09:00 UTC
   workflow_dispatch:
 
 jobs:

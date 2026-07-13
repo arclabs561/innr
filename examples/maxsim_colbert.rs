@@ -9,7 +9,7 @@
 //! precomputation of document token embeddings.
 //!
 //! ```bash
-//! cargo run --example maxsim_colbert --release --features maxsim
+//! cargo run --example maxsim_colbert --release
 //! ```
 
 use innr::{dot, maxsim};

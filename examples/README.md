@@ -40,11 +40,11 @@ cargo run --example matryoshka_search --release
 
 | Example | What It Covers | Feature Flag |
 |---------|----------------|--------------|
-| `maxsim_colbert` | ColBERT-style late interaction scoring, non-commutativity | `maxsim` |
+| `maxsim_colbert` | ColBERT-style late interaction scoring, non-commutativity | none |
 | `batch_demo` | PDX columnar layout, batch kNN, batch dot, timing | (none) |
 
 ```sh
-cargo run --example maxsim_colbert --release --features maxsim
+cargo run --example maxsim_colbert --release
 cargo run --example batch_demo --release
 ```
 
@@ -69,7 +69,7 @@ Prefix-truncatable (MRL) two-stage retrieval?
   --> matryoshka_cosine coarse pass + cosine fine pass (matryoshka_search)
 
 ColBERT / late interaction scoring?
-  --> maxsim (maxsim_colbert, requires --features maxsim)
+  --> maxsim (maxsim_colbert)
 
 Batch kNN over a corpus?
   --> VerticalBatch + batch_knn (batch_demo)

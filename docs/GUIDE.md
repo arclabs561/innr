@@ -15,7 +15,7 @@ let distance = l2_distance(&a, &b);   // [0, ∞)
 let product = dot(&a, &b);            // 20.0
 ```
 
-Run: `cargo run --example simd_benchmark --release`
+Run: `cargo run --example 01_basic_ops --release`
 
 ---
 
@@ -43,9 +43,10 @@ Run: `cargo run --example simd_benchmark --release`
 Process N vectors against one query:
 
 ```rust
-use innr::batch_dot;
+use innr::batch::{batch_dot, VerticalBatch};
 
-let scores = batch_dot(&query, &documents_flat, dimension);
+let batch = VerticalBatch::from_rows(&documents);
+let scores = batch_dot(&query, &batch);
 ```
 
 **Why batch?** Amortizes function call overhead; enables better cache usage.
@@ -65,14 +66,10 @@ NEON     → 4 floats/instruction   (all ARM64)
 Scalar   → 1 float/instruction    (fallback)
 ```
 
-### Performance (768-dim vectors)
+### Performance
 
-| Architecture | Throughput vs scalar |
-|-------------|---------------------|
-| Scalar | 1x |
-| NEON | 3-4x |
-| AVX2+FMA | 4-6x |
-| AVX-512 | 8-12x |
+Throughput depends on dimension, cache residency, and the selected kernel.
+Run `cargo bench` on the target machine before making a deployment choice.
 
 ---
 
@@ -162,6 +159,7 @@ Threshold too low → mostly ±1 → loses information.
 
 | Example | Demonstrates |
 |---------|-------------|
-| `simd_benchmark` | SIMD speedup by dimension |
+| `01_basic_ops` | Core similarity operations |
+| `batch_demo` | Batch scan and k-NN helpers |
 | `fast_math_demo` | rsqrt approximation accuracy |
 | `ternary_demo` | Compression, speed, quality tradeoffs |

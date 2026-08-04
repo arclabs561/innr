@@ -15,7 +15,15 @@ repository:
   delete_branch_on_merge: true
 
   topics:
-    - simd
-    - vector-similarity
+    - clifford-algebra
     - cosine-similarity
+    - dot-product
+    - embeddings
+    - linear-algebra
+    - matryoshka-learning
+    - maxsim
     - rust
+    - simd
+    - vector
+    - vector-search
+    - vector-similarity

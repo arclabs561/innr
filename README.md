@@ -96,7 +96,7 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). MSRV 1.75 applies to aarch64 and portable targets; x86_64 requires Rust 1.89+ (AVX-512 intrinsic stabilization).
+Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). The crate's MSRV is Rust 1.89.
 
 ## Performance
 

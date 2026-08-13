@@ -128,7 +128,7 @@ pub use binary::{binary_dot, binary_hamming, binary_jaccard, encode_binary, Pack
 // Re-export fast math (rsqrt-based approximations)
 pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
 
-/// Ternary quantization (1.58-bit) for ultra-compressed embeddings.
+/// Ternary quantization using a packed 2-bit representation.
 pub mod ternary;
 
 /// Scalar quantization (uint8) for memory-efficient asymmetric similarity.

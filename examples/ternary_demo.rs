@@ -1,6 +1,6 @@
-//! Ternary Quantization: 16x Memory, 18x Speed
+//! Ternary quantization with a packed 2-bit representation
 //!
-//! Demonstrates the trade-offs of 1.58-bit ternary quantization.
+//! Demonstrates storage, timing, and ranking trade-offs of ternary quantization.
 //!
 //! Ternary excels at: memory compression, fast similarity, deduplication
 //! Ternary struggles with: high-recall nearest neighbor search

@@ -19,7 +19,7 @@ cargo run --example fast_math_demo --release
 | Example | What It Covers | Compression |
 |---------|----------------|-------------|
 | `binary_demo` | 1-bit quantization: Hamming, dot, Jaccard, recall trade-off | 32x vs f32 |
-| `ternary_demo` | 1.58-bit quantization: speed, dedup, ranking accuracy | 16x vs f32 |
+| `ternary_demo` | Packed 2-bit ternary quantization: timing, dedup, ranking accuracy | 16x less storage than f32 |
 
 ```sh
 cargo run --example binary_demo --release

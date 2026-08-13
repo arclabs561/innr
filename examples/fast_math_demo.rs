@@ -1,6 +1,6 @@
 //! Fast Math Demo
 //!
-//! Demonstrates Newton-Raphson rsqrt approximation for 3-10x faster cosine similarity.
+//! Demonstrates a Newton-Raphson rsqrt approximation and measures it locally.
 //!
 //! # Why Fast Approximations Matter
 //!
@@ -8,7 +8,7 @@
 //! but each hop computes distance to M neighbors (~32). At 1M vectors, that's
 //! ~20 hops * 32 distances = 640 distance calls per query.
 //!
-//! A 3x speedup in cosine = 3x faster search. This is why `innr` exists.
+//! End-to-end search performance also depends on data access and surrounding work.
 //!
 //! # Integration
 //!

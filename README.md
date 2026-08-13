@@ -51,7 +51,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Core (f32)**: `dot`, `cosine`, `norm`, `l2_distance`, `l2_distance_squared`, `l1_distance`, `angular_distance`, `normalize`, `normalize_with_norm` (normalize in place, returns the original norm). Portable fallbacks in `innr::dense` (e.g. `dot_portable`).
 
-**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}`: SIMD-dispatched (AVX-512/AVX2/NEON) with exact FMA accumulation, for iterative-solver residuals and statistical reductions.
+**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}`: SIMD-dispatched (AVX-512/AVX2/NEON), for iterative-solver residuals and statistical reductions. SIMD and portable paths may differ in floating-point rounding.
 
 **Backend introspection**: `innr::backend::{dense_backend, slot_backend}` report which kernel family (`Avx512` / `Avx2Fma` / `Neon` / `Portable`) a given length dispatches to on this machine.
 
@@ -59,7 +59,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Binary quantization (1-bit)**: `encode_binary` to packed bits, `binary_dot`, `binary_hamming`, `binary_jaccard`. 32x memory reduction over f32.
 
-**Ternary quantization (1.58-bit)**: `ternary::encode_ternary` to {-1, 0, +1}, `ternary_dot`, `ternary_hamming`, `asymmetric_dot` (float query x ternary doc). 16-20x compression.
+**Ternary quantization (2-bit storage)**: `ternary::encode_ternary` to {-1, 0, +1}, `ternary_dot`, `ternary_hamming`, `asymmetric_dot` (float query x ternary doc). The packed representation uses two bits per dimension, or 16x less storage than f32.
 
 **Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`; raw f32-by-u8 inner loop via `mixed_dot_u8_f32`. Batch search via `batch_knn_u8`. 4x compression.
 
@@ -104,7 +104,9 @@ Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantiz
 
 *Apple Silicon (NEON). Run `cargo bench` to reproduce on your hardware.*
 
-The f64 reductions reach ~8.5 Gelem/s and `slot_hamming_u64` ~5.6 Gelem/s on Apple silicon (NEON), measured cache-resident and single-core; cold-load streaming throughput is lower. AVX-512 paths are executed and differential-tested in CI under Intel SDE.
+The plotted measurements are cache-resident, single-core runs on Apple Silicon
+(NEON). Results depend on the CPU, compiler, vector length, and memory behavior.
+AVX-512 paths are executed and differential-tested in CI under Intel SDE.
 
 For maximum performance, build with native CPU features:
 
@@ -128,13 +130,13 @@ cargo bench
 
 More in [`examples/`](examples/):
 
-[**fast_math_demo.rs**](examples/fast_math_demo.rs): Newton-Raphson `rsqrt` for 3-10x faster cosine, the speed/accuracy trade-off for first-stage scoring.
+[**fast_math_demo.rs**](examples/fast_math_demo.rs): Newton-Raphson `rsqrt` and a local timing harness for examining the speed/accuracy trade-off.
 
 [**matryoshka_search.rs**](examples/matryoshka_search.rs): MRL progressive search: a coarse pass on a 128d prefix, then a fine pass at full 768d, the cheap-then-precise pattern for large indexes.
 
 [**maxsim_colbert.rs**](examples/maxsim_colbert.rs): ColBERT-style MaxSim late interaction, the per-token scoring multi-vector rerankers use.
 
-[**ternary_demo.rs**](examples/ternary_demo.rs): 1.58-bit ternary quantization: 16x memory and ~18x speed, with the recall trade-off measured.
+[**ternary_demo.rs**](examples/ternary_demo.rs): ternary quantization in a packed 2-bit representation, with local timing and ranking comparisons.
 
 ## Tests
 

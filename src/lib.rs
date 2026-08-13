@@ -11,7 +11,7 @@
 //! | **Distance (L2)** | [`l2_distance`] | For k-NN, clustering |
 //! | **Token-level matching** | [`maxsim`] | ColBERT-style late interaction |
 //! | **Sparse vectors** | [`sparse_dot`] | BM25 scores, SPLADE |
-//! | **INT8 embeddings** | [`dot_u8`] | Quantized vector search |
+//! | **INT8 embeddings** | [`dot_u8_wide`] | Quantized vector search |
 //! | **Binary embeddings** | [`hamming_distance`] | Byte-packed bit vectors |
 //! | **MinHash sketches** | [`slot_hamming_u32`] / [`minhash_jaccard`] | Integer-slot match counting |
 //! | **Generic metric backend** | [`distance::Distance`] | Plug innr into a generic index |
@@ -38,6 +38,8 @@
 //!   `slot_hamming_u32`, `maxsim`, ...) panic. The `*_portable` variants
 //!   and the `dense_f64` module compare over the shorter length; each such
 //!   function documents this.
+//! - **Integer dot overflow**: [`dot_u8`] panics rather than wrapping; use
+//!   [`checked_dot_u8`] for an optional `u32` or [`dot_u8_wide`] for `u64`.
 //! - **Zero norms**: similarity functions return `0.0` when either norm is
 //!   below `1e-9` (compared in squared space against `NORM_EPSILON_SQ`).
 //! - **NaN**: propagates through `dot`/distances; `cosine` returns `0.0`
@@ -151,7 +153,7 @@ pub use sparse::{sparse_dot, sparse_maxsim};
 
 pub use maxsim::{maxsim, maxsim_cosine};
 
-pub use quant::{dot_u8, hamming_distance};
+pub use quant::{checked_dot_u8, dot_u8, dot_u8_wide, hamming_distance};
 
 pub use slot::{
     jaccard_distance, minhash_jaccard, slot_compare_counts, slot_hamming, slot_hamming_u16,

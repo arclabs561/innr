@@ -2,7 +2,8 @@
 //!
 //! These are the hot inner loops for quantized vector search:
 //!
-//! - `dot_u8`: symmetric u8×u8 dot product for INT8-quantized embeddings
+//! - [`dot_u8_wide`]: symmetric u8×u8 dot product for INT8-quantized embeddings
+//! - [`dot_u8`]: the same operation with a checked `u32` result
 //! - `hamming_distance`: byte-packed Hamming distance for binary-quantized embeddings
 //!
 //! # Dispatch
@@ -22,10 +23,13 @@ const MIN_DIM_SIMD: usize = 32;
 #[cfg(target_arch = "x86_64")]
 const MIN_DIM_AVX512: usize = 64;
 
+/// Largest number of maximal u8 products whose sum fits in a `u32`.
+const MAX_U32_DOT_DIM: usize = u32::MAX as usize / (u8::MAX as usize * u8::MAX as usize);
+
 /// Unsigned 8-bit integer dot product: `Σ(a[i] * b[i])`.
 ///
-/// Returns 0 for empty slices. Computes in a `u32` accumulator to avoid overflow
-/// (max value per element = 255 * 255 = 65025; max total at dim 65535 ≈ 4.26e9 < u32::MAX).
+/// Returns 0 for empty slices. For vectors whose result may not fit in `u32`,
+/// use [`dot_u8_wide`] or [`checked_dot_u8`].
 ///
 /// # SIMD Acceleration
 ///
@@ -37,7 +41,7 @@ const MIN_DIM_AVX512: usize = 64;
 ///
 /// # Panics
 ///
-/// Panics if `a.len() != b.len()`.
+/// Panics if `a.len() != b.len()` or the result exceeds [`u32::MAX`].
 ///
 /// # Example
 ///
@@ -60,6 +64,52 @@ pub fn dot_u8(a: &[u8], b: &[u8]) -> u32 {
         a.len(),
         b.len()
     );
+    checked_dot_u8(a, b).expect("innr::dot_u8: result exceeds u32::MAX; use dot_u8_wide")
+}
+
+/// Unsigned 8-bit integer dot product with an exact `u64` result.
+///
+/// This is the preferred API when vector dimensions or input magnitudes are
+/// not known to keep the result within `u32`. SIMD kernels are evaluated in
+/// bounded chunks so their `u32` partial sums cannot overflow.
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()` or the exact result exceeds `u64::MAX`.
+#[inline]
+#[must_use]
+#[allow(unsafe_code)]
+pub fn dot_u8_wide(a: &[u8], b: &[u8]) -> u64 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::dot_u8_wide: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+
+    a.chunks(MAX_U32_DOT_DIM)
+        .zip(b.chunks(MAX_U32_DOT_DIM))
+        .map(|(a, b)| dot_u8_chunk(a, b) as u64)
+        .try_fold(0_u64, u64::checked_add)
+        .expect("innr::dot_u8_wide: result exceeds u64::MAX")
+}
+
+/// Unsigned 8-bit integer dot product if its result fits in `u32`.
+///
+/// Returns `None` when the exact result exceeds [`u32::MAX`]. Length mismatch
+/// remains a programming error and panics, as it does for [`dot_u8`].
+#[inline]
+#[must_use]
+pub fn checked_dot_u8(a: &[u8], b: &[u8]) -> Option<u32> {
+    u32::try_from(dot_u8_wide(a, b)).ok()
+}
+
+#[inline]
+#[allow(unsafe_code)]
+fn dot_u8_chunk(a: &[u8], b: &[u8]) -> u32 {
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert!(a.len() <= MAX_U32_DOT_DIM);
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     let n = a.len();
@@ -99,26 +149,37 @@ pub fn dot_u8(a: &[u8], b: &[u8]) -> u32 {
 #[inline]
 #[must_use]
 pub fn dot_u8_portable(a: &[u8], b: &[u8]) -> u32 {
+    u32::try_from(dot_u8_wide_portable(a, b))
+        .expect("innr::dot_u8_portable: result exceeds u32::MAX; use dot_u8_wide_portable")
+}
+
+/// Portable u8 dot product with an exact `u64` result.
+///
+/// Unlike the dispatched public APIs, this low-level implementation processes
+/// the common prefix when the slice lengths differ.
+#[inline]
+#[must_use]
+pub fn dot_u8_wide_portable(a: &[u8], b: &[u8]) -> u64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
-    let mut s0: u32 = 0;
-    let mut s1: u32 = 0;
-    let mut s2: u32 = 0;
-    let mut s3: u32 = 0;
+    let mut s0: u64 = 0;
+    let mut s1: u64 = 0;
+    let mut s2: u64 = 0;
+    let mut s3: u64 = 0;
 
     for i in 0..chunks {
         let base = i * 4;
-        s0 += a[base] as u32 * b[base] as u32;
-        s1 += a[base + 1] as u32 * b[base + 1] as u32;
-        s2 += a[base + 2] as u32 * b[base + 2] as u32;
-        s3 += a[base + 3] as u32 * b[base + 3] as u32;
+        s0 += a[base] as u64 * b[base] as u64;
+        s1 += a[base + 1] as u64 * b[base + 1] as u64;
+        s2 += a[base + 2] as u64 * b[base + 2] as u64;
+        s3 += a[base + 3] as u64 * b[base + 3] as u64;
     }
 
-    let mut result = s0.wrapping_add(s1).wrapping_add(s2).wrapping_add(s3);
+    let mut result = s0 + s1 + s2 + s3;
 
     for i in (chunks * 4)..n {
-        result += a[i] as u32 * b[i] as u32;
+        result += a[i] as u64 * b[i] as u64;
     }
 
     result
@@ -210,6 +271,41 @@ pub fn hamming_portable(a: &[u8], b: &[u8]) -> u32 {
 mod tests {
     use super::*;
 
+    fn dot_u8_oracle(a: &[u8], b: &[u8]) -> u64 {
+        let exact: u128 = a
+            .iter()
+            .zip(b)
+            .map(|(&x, &y)| u128::from(x) * u128::from(y))
+            .sum();
+        u64::try_from(exact).expect("test vector dot product fits in u64")
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[allow(unsafe_code)]
+    unsafe fn wide_from_x86_kernel(
+        a: &[u8],
+        b: &[u8],
+        kernel: unsafe fn(&[u8], &[u8]) -> u32,
+    ) -> u64 {
+        a.chunks(MAX_U32_DOT_DIM)
+            .zip(b.chunks(MAX_U32_DOT_DIM))
+            .map(|(a, b)| unsafe { kernel(a, b) } as u64)
+            .sum()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[allow(unsafe_code)]
+    unsafe fn wide_from_neon_kernel(
+        a: &[u8],
+        b: &[u8],
+        kernel: unsafe fn(&[u8], &[u8]) -> u32,
+    ) -> u64 {
+        a.chunks(MAX_U32_DOT_DIM)
+            .zip(b.chunks(MAX_U32_DOT_DIM))
+            .map(|(a, b)| unsafe { kernel(a, b) } as u64)
+            .sum()
+    }
+
     // =========================================================================
     // dot_u8 tests
     // =========================================================================
@@ -272,6 +368,95 @@ mod tests {
             let expected: u32 = a.iter().zip(&b).map(|(&x, &y)| x as u32 * y as u32).sum();
             assert_eq!(dot_u8(&a, &b), expected, "dot_u8 mismatch at size={size}");
         }
+    }
+
+    #[test]
+    fn dot_u8_overflow_boundary_is_explicit() {
+        for size in [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1] {
+            let a = vec![u8::MAX; size];
+            let b = vec![u8::MAX; size];
+            let expected = dot_u8_oracle(&a, &b);
+
+            assert_eq!(dot_u8_wide(&a, &b), expected);
+            assert_eq!(dot_u8_wide_portable(&a, &b), expected);
+            assert_eq!(checked_dot_u8(&a, &b), u32::try_from(expected).ok());
+        }
+
+        let a = vec![u8::MAX; MAX_U32_DOT_DIM];
+        assert_eq!(
+            dot_u8(&a, &a),
+            u32::try_from(dot_u8_oracle(&a, &a)).unwrap()
+        );
+
+        let a = vec![u8::MAX; MAX_U32_DOT_DIM + 1];
+        let panic = std::panic::catch_unwind(|| dot_u8(&a, &a));
+        assert!(panic.is_err(), "legacy u32 API must not silently wrap");
+    }
+
+    #[test]
+    fn dot_u8_wide_matches_independent_oracle_on_deterministic_inputs() {
+        for size in [0, 1, 31, 32, 63, 64, 65, 4097, MAX_U32_DOT_DIM + 1] {
+            let a: Vec<u8> = (0..size)
+                .map(|i| ((i as u64 * 73 + 19) % 256) as u8)
+                .collect();
+            let b: Vec<u8> = (0..size)
+                .map(|i| ((i as u64 * 151 + 41) % 256) as u8)
+                .collect();
+            assert_eq!(dot_u8_wide(&a, &b), dot_u8_oracle(&a, &b));
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn x86_dot_u8_kernels_match_oracle_at_overflow_boundary() {
+        let sizes = [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1];
+        for size in sizes {
+            let a = vec![u8::MAX; size];
+            let expected = dot_u8_oracle(&a, &a);
+
+            if is_x86_feature_detected!("avx2") {
+                let got = unsafe { wide_from_x86_kernel(&a, &a, crate::arch::x86_64::dot_u8_avx2) };
+                assert_eq!(got, expected, "AVX2 mismatch at size {size}");
+            }
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                let got =
+                    unsafe { wide_from_x86_kernel(&a, &a, crate::arch::x86_64::dot_u8_avx512) };
+                assert_eq!(got, expected, "AVX-512 mismatch at size {size}");
+            }
+        }
+
+        let size = 4097;
+        let a: Vec<u8> = (0..size).map(|i| ((i * 73 + 19) % 256) as u8).collect();
+        let b: Vec<u8> = (0..size).map(|i| ((i * 151 + 41) % 256) as u8).collect();
+        let expected = dot_u8_oracle(&a, &b);
+        if is_x86_feature_detected!("avx2") {
+            let got = unsafe { wide_from_x86_kernel(&a, &b, crate::arch::x86_64::dot_u8_avx2) };
+            assert_eq!(got, expected, "AVX2 random-pattern mismatch");
+        }
+        if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+            let got = unsafe { wide_from_x86_kernel(&a, &b, crate::arch::x86_64::dot_u8_avx512) };
+            assert_eq!(got, expected, "AVX-512 random-pattern mismatch");
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn neon_dot_u8_kernel_matches_oracle_at_overflow_boundary() {
+        for size in [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1] {
+            let a = vec![u8::MAX; size];
+            let expected = dot_u8_oracle(&a, &a);
+            let got = unsafe { wide_from_neon_kernel(&a, &a, crate::arch::aarch64::dot_u8_neon) };
+            assert_eq!(got, expected, "NEON mismatch at size {size}");
+        }
+
+        let size = 4097;
+        let a: Vec<u8> = (0..size).map(|i| ((i * 73 + 19) % 256) as u8).collect();
+        let b: Vec<u8> = (0..size).map(|i| ((i * 151 + 41) % 256) as u8).collect();
+        let expected = dot_u8_oracle(&a, &b);
+        let got = unsafe { wide_from_neon_kernel(&a, &b, crate::arch::aarch64::dot_u8_neon) };
+        assert_eq!(got, expected, "NEON random-pattern mismatch");
     }
 
     #[test]

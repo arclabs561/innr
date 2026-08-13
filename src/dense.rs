@@ -347,16 +347,25 @@ pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
 
 /// Angular distance: `acos(cosine_similarity) / π`.
 ///
-/// Unlike cosine similarity, angular distance is a **true metric**:
-/// 1. d(x, y) >= 0
-/// 2. d(x, y) = 0 iff x = y
-/// 3. d(x, y) = d(y, x)
-/// 4. d(x, z) <= d(x, y) + d(y, z) (Triangle Inequality)
+/// For nonzero vectors this measures the angle between directions. It is a
+/// metric on directions (nonzero vectors modulo positive scaling), but not on
+/// raw vectors: `angular_distance(x, 2 * x) == 0` even though the vectors are
+/// different.
 ///
 /// Range: `[0, 1]`.
 /// - 0: Identical direction
 /// - 0.5: Orthogonal
 /// - 1: Opposite direction
+///
+/// If either vector has effectively-zero norm, [`cosine`] returns `0.0`, so
+/// this function returns `0.5`. This includes two zero vectors and empty
+/// vectors. Inputs containing infinities are outside the finite-input contract
+/// and may produce `NaN`; a `NaN` component is absorbed by [`cosine`]'s
+/// zero-norm guard and therefore produces `0.5`.
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
 ///
 /// # Example
 ///
@@ -1033,6 +1042,32 @@ mod tests {
         // cosine(a,a) may be slightly above 1.0 due to fp rounding, clamped to 1.0
         // before acos, so acos(1.0) / pi is at most a small fp epsilon.
         assert!(d < 1e-3, "identical vectors angular_distance: got {d}");
+    }
+
+    #[test]
+    fn test_angular_distance_is_a_metric_on_directions_not_raw_vectors() {
+        let a = [1.0_f32, 2.0, 3.0];
+        let scaled = [2.0_f32, 4.0, 6.0];
+
+        assert_ne!(a, scaled);
+        assert!(angular_distance(&a, &scaled) < 1e-3);
+    }
+
+    #[test]
+    fn test_angular_distance_zero_vector_contract() {
+        let zero = [0.0_f32, 0.0];
+        let nonzero = [1.0_f32, 0.0];
+
+        assert_eq!(angular_distance(&zero, &zero), 0.5);
+        assert_eq!(angular_distance(&zero, &nonzero), 0.5);
+        assert_eq!(angular_distance(&nonzero, &zero), 0.5);
+        assert_eq!(angular_distance(&[], &[]), 0.5);
+    }
+
+    #[test]
+    fn test_angular_distance_nonfinite_contract() {
+        assert_eq!(angular_distance(&[f32::NAN], &[1.0]), 0.5);
+        assert!(angular_distance(&[f32::INFINITY], &[1.0]).is_nan());
     }
 
     #[test]

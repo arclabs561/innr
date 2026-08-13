@@ -43,7 +43,8 @@
 //! - **Zero norms**: similarity functions return `0.0` when either norm is
 //!   below `1e-9` (compared in squared space against `NORM_EPSILON_SQ`).
 //! - **NaN**: propagates through `dot`/distances; `cosine` returns `0.0`
-//!   for NaN inputs because the zero-norm guard absorbs them.
+//!   for NaN inputs because the zero-norm guard absorbs them. Infinite
+//!   components are outside the finite-input contract and may produce NaN.
 //! - **Empty inputs**: reductions return `0.0`; `minhash_jaccard` of two
 //!   empty sketches returns `1.0`.
 //!

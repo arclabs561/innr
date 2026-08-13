@@ -427,14 +427,16 @@ pub fn batch_knn(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnnResu
 /// contribution per dimension.
 ///
 /// **When it works well**: MRL/Matryoshka embeddings where early dimensions
-/// carry more information -- the extrapolation is conservative (overestimates
-/// full distance), so pruning is safe.
+/// carry more information and partial distances separate candidates early.
 ///
 /// **When it fails**: embeddings where later dimensions carry more variance
 /// than early ones. The extrapolation underestimates the full distance,
 /// causing true nearest neighbors to be pruned.
 ///
-/// For guaranteed correctness, use [`batch_knn`] instead.
+/// The result always contains `min(k, batch.num_vectors())` candidates, and
+/// their reported distances include every dimension. Candidate selection is
+/// still approximate: a pruned candidate may have ranked in the exact top-k.
+/// For exact candidate selection, use [`batch_knn`] instead.
 #[must_use]
 pub fn batch_knn_adaptive(
     query: &[f32],
@@ -453,10 +455,17 @@ pub fn batch_knn_adaptive(
     }
 
     let k = k.min(batch.num_vectors);
+    if batch.dimension == 0 {
+        return BatchKnnResult {
+            indices: (0..k).collect(),
+            scores: vec![0.0; k],
+        };
+    }
     let warmup_dims = warmup_dims.min(batch.dimension);
 
     let mut distances = vec![0.0f32; batch.num_vectors];
     let mut alive: Vec<bool> = vec![true; batch.num_vectors];
+    let mut alive_count = batch.num_vectors;
 
     // Phase 1: Warmup - process first dimensions fully
     for (d, &q_d) in query.iter().enumerate().take(warmup_dims) {
@@ -481,9 +490,10 @@ pub fn batch_knn_adaptive(
     for (i, &dist) in distances.iter().enumerate() {
         // Scale partial distance to estimate full distance
         let estimated_full = dist * (batch.dimension as f32 / warmup_dims as f32);
-        if estimated_full > threshold * 1.5 {
+        if alive_count > k && estimated_full > threshold * 1.5 {
             // Conservative margin
             alive[i] = false;
+            alive_count -= 1;
         }
     }
 
@@ -512,8 +522,9 @@ pub fn batch_knn_adaptive(
             *dist += diff * diff;
 
             // Prune if definitely beyond k-th best
-            if *dist > threshold {
+            if alive_count > k && *dist > threshold {
                 *is_alive = false;
+                alive_count -= 1;
             }
         }
 
@@ -1531,6 +1542,33 @@ mod tests {
         // Both should find v0 (the origin) as nearest
         assert_eq!(exact.indices[0], 0);
         assert_eq!(adaptive.indices[0], 0);
+    }
+
+    #[test]
+    fn test_batch_knn_adaptive_keeps_k_finalized_candidates() {
+        // Regression: a zero warmup distance made the threshold zero, so the
+        // next non-zero dimension pruned the sole candidate and returned an
+        // empty result for a non-empty corpus.
+        let vectors = vec![vec![0.0, 1.0]];
+        let batch = VerticalBatch::from_rows(&vectors);
+
+        let adaptive = batch_knn_adaptive(&[0.0, 0.0], &batch, 1, 1);
+        let exact = batch_knn(&[0.0, 0.0], &batch, 1);
+
+        assert_eq!(adaptive.indices.len(), 1);
+        assert_eq!(adaptive.indices, exact.indices);
+        assert_eq!(adaptive.scores, exact.scores);
+    }
+
+    #[test]
+    fn test_batch_knn_adaptive_zero_dimensional_batch_keeps_k() {
+        let vectors = vec![vec![], vec![], vec![]];
+        let batch = VerticalBatch::from_rows(&vectors);
+
+        let result = batch_knn_adaptive(&[], &batch, 2, 1);
+
+        assert_eq!(result.indices, vec![0, 1]);
+        assert_eq!(result.scores, vec![0.0, 0.0]);
     }
 
     // =========================================================================

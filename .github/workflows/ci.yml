@@ -144,6 +144,8 @@ jobs:
   # Catches: aliasing violations, uninitialized memory, out-of-bounds
   miri:
     runs-on: ubuntu-latest
+    # Match the bounded Miri sampling policy used by the newer release line.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -159,6 +161,7 @@ jobs:
       - name: Miri tests (safe subset)
         env:
           MIRIFLAGS: "-Zmiri-disable-isolation"
+          PROPTEST_CASES: 16
         run: |
           # Miri can't run SIMD intrinsics, so test scalar paths
           # -Zmiri-disable-isolation allows proptest to access getcwd/filesystem

@@ -15,6 +15,7 @@
 use crate::arch;
 
 /// Minimum vector length for SIMD to be worthwhile on these integer paths.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const MIN_DIM_SIMD: usize = 32;
 
 /// Minimum dimension for the AVX-512 path (64-byte chunks).

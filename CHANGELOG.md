@@ -10,6 +10,11 @@
   dimension is checked before unchecked dense indexing; out-of-range entries
   continue to be ignored.
 
+### Fixed
+
+- Gate the integer SIMD threshold to supported architectures so ARMv7 builds
+  remain warning-free.
+
 ## 0.2.0
 
 New modules:

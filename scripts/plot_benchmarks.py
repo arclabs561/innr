@@ -4,10 +4,12 @@
 # ///
 """Generate throughput benchmark plot for innr README."""
 
+from pathlib import Path
+
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 
 # Benchmark data from criterion (Apple Silicon, NEON)
 # Format: dimension -> median time in nanoseconds
@@ -76,5 +78,8 @@ for i in range(1, len(common_dims) + 1):
         table[i, j].set_facecolor("#f8fafc" if i % 2 == 0 else "white")
 
 fig.tight_layout(pad=2.0)
-fig.savefig("/Users/arc/Documents/dev/innr/docs/bench_throughput.png", dpi=150, bbox_inches="tight", facecolor="white")
+fig.savefig(
+    Path(__file__).resolve().parents[1] / "docs" / "bench_throughput.png",
+    dpi=150, bbox_inches="tight", facecolor="white",
+)
 print("Saved innr/docs/bench_throughput.png")

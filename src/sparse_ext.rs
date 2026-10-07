@@ -69,10 +69,9 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
 
     let dense_len = dense.len();
 
-    // Fast path: if the largest dimension in the sparse vector fits in dense,
-    // no per-element bounds check is needed.
-    // SAFETY: sparse is non-empty (checked above), so last() is always Some.
-    let max_dim = unsafe { sparse.last().unwrap_unchecked() }.0 as usize;
+    // A safe function must also bound unsorted input before unchecked indexing.
+    // Sparse is non-empty (checked above), so the maximum always exists.
+    let max_dim = sparse.iter().map(|&(dim, _)| dim).max().unwrap() as usize;
 
     if max_dim < dense_len {
         // All indices are in-bounds: skip the filter, use unsafe indexing.
@@ -89,7 +88,7 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
             let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
             let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
             let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
-            // SAFETY: max_dim < dense_len and all dims <= max_dim (sorted input).
+            // SAFETY: max_dim is the maximum of every dimension and is < dense_len.
             s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
             s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
             s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
@@ -233,6 +232,32 @@ mod tests {
         let sparse = [(1u32, 1.0f32), (10, 99.0)];
         let dense = [0.0f32, 5.0, 0.0, 0.0];
         assert!((sparse_dense_dot(&sparse, &dense) - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sparse_dense_dot_unsorted_chunk_and_tail_bounds() {
+        let dense = [2.0, 3.0, 5.0];
+        // The final dimension is in bounds in every case. Out-of-bounds
+        // entries occur in both the unrolled chunk and scalar tail.
+        for sparse in [
+            vec![(9, 100.0), (0, 1.0), (2, 2.0), (1, 3.0)],
+            vec![(0, 1.0), (2, 2.0), (1, 3.0), (0, 4.0), (9, 100.0), (1, 5.0)],
+            vec![
+                (9, 100.0),
+                (2, 2.0),
+                (1, 3.0),
+                (0, 4.0),
+                (8, 100.0),
+                (1, 5.0),
+            ],
+            vec![(2, 2.0), (0, 1.0), (1, 3.0), (0, 4.0), (2, 5.0), (1, 6.0)],
+        ] {
+            let expected: f32 = sparse
+                .iter()
+                .filter_map(|&(dim, weight)| dense.get(dim as usize).map(|value| weight * value))
+                .sum();
+            assert_eq!(sparse_dense_dot(&sparse, &dense), expected);
+        }
     }
 
     #[test]

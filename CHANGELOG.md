@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.5.2] - 2026-10-06
+
+### Security
+
+- Fixed `sparse_dense_dot` bounds validation for unsorted sparse input. Every
+  dimension is checked before unchecked dense indexing; out-of-range entries
+  continue to be ignored.
+
 ## 0.5.1
 
 Refinements to the 0.5.0 slot/distance surface, grounded in how the
@@ -63,3 +73,5 @@ Quality:
 ## 0.1.8
 
 - Fix length mismatch panic, add SAFETY docs, clean dead code, harden tests
+
+[0.5.2]: https://github.com/arclabs561/innr/compare/v0.5.1...v0.5.2

@@ -13,7 +13,7 @@ with scalar fallback.
 
 ```toml
 [dependencies]
-innr = "0.2"
+innr = "0.5.2"
 ```
 
 ```rust
@@ -76,7 +76,7 @@ let result = batch_knn_dot(&query, &batch, 2);
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Vectors < 16 dimensions use portable code. MSRV 1.75 applies to aarch64 and portable targets; x86_64 requires Rust 1.89+ (AVX-512 intrinsic stabilization).
+Vectors < 16 dimensions use portable code. Rust 1.89 or later is required on all targets.
 
 ## Performance
 

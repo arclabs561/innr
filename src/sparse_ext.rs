@@ -169,11 +169,7 @@ pub fn sparse_top_k(v: &[(u32, f32)], k: usize) -> Vec<(u32, f32)> {
         return v.to_vec();
     }
     let mut by_weight: Vec<_> = v.to_vec();
-    by_weight.sort_by(|a, b| {
-        b.1.abs()
-            .partial_cmp(&a.1.abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    by_weight.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
     by_weight.truncate(k);
     by_weight.sort_by_key(|(dim, _)| *dim);
     by_weight
@@ -186,6 +182,30 @@ pub fn sparse_max_weight(v: &[(u32, f32)]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    /// NaN weights must not panic the top-k sort (Rust >= 1.81 may panic on
+    /// a comparator that is not a total order).
+    #[test]
+    fn sparse_top_k_tolerates_nan() {
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..50 {
+            let v: Vec<(u32, f32)> = (0..200u32)
+                .map(|i| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    let w = if state.is_multiple_of(10) {
+                        f32::NAN
+                    } else {
+                        (state % 1000) as f32 / 100.0 - 5.0
+                    };
+                    (i, w)
+                })
+                .collect();
+            let top = super::sparse_top_k(&v, 20);
+            assert_eq!(top.len(), 20);
+        }
+    }
+
     #[test]
     fn unsorted_sparse_input_is_safe_and_correct() {
         // Regression: fast path took last() as max, sound only for sorted input;

@@ -38,3 +38,10 @@ path = "fuzz_targets/slot_diff.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "quantize_u8_diff"
+path = "fuzz_targets/quantize_u8_diff.rs"
+test = false
+doc = false
+bench = false

@@ -9,6 +9,10 @@ Euclidean distance over `f32` / `u8`, plus binary, ternary, and
 scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
 with scalar fallback.
 
+SimSIMD covers more metrics, types and instruction sets through C kernels with
+Rust bindings; innr is pure Rust with no C toolchain or dependencies, and adds
+quantized, batch and late-interaction kernels.
+
 ## Quickstart
 
 ```toml

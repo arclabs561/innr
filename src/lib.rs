@@ -116,6 +116,12 @@ mod sparse;
 #[cfg(feature = "sparse")]
 pub mod sparse_ext;
 
+/// Compiles and runs the README's Rust examples as doctests. The `hnsw_rs`
+/// example needs the `anndists` feature (and the `hnsw_rs` dev-dependency).
+#[cfg(all(doctest, feature = "anndists"))]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
 /// ColBERT MaxSim late interaction scoring for multi-vector retrieval.
 mod maxsim;
 

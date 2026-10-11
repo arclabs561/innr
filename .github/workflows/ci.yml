@@ -59,6 +59,12 @@ jobs:
       - name: Test
         run: cargo test --all-features
 
+      - name: Test portable kernels
+        run: cargo test --no-default-features
+
+      - name: Clippy portable kernels
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
       - name: Run example assertions
         run: |
           cargo run --example 01_basic_ops --all-features
@@ -272,11 +278,12 @@ jobs:
       - name: Check MSRV
         run: |
           # MSRV matches Cargo.toml `rust-version = "1.89"`. The 1.89 floor
-          # is set by AVX-512 intrinsics on x86_64; bumping in lockstep with
-          # Cargo.toml keeps the gate honest.
+          # also covers slice::as_chunks used by the safe SIMD kernels.
           rm -f Cargo.lock
           rustup target add aarch64-unknown-linux-gnu
           cargo check --target aarch64-unknown-linux-gnu
+          cargo check
+          cargo check --no-default-features
 
   # Dependency linting (licenses, advisories, bans, sources)
   deny:

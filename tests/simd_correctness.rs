@@ -8,7 +8,7 @@
 
 #![allow(clippy::float_cmp)]
 
-use innr::{cosine, dot, fast_cosine_dispatch, l2_distance, l2_distance_squared};
+use innr::{cosine, dot, l2_distance, l2_distance_squared};
 
 // =============================================================================
 // Reference Implementations (Pure Scalar)
@@ -187,28 +187,6 @@ fn simd_correctness_cosine() {
                 "cosine mismatch at dim={}: simd={}, ref={}",
                 dim,
                 simd_result,
-                ref_result
-            );
-        }
-    }
-}
-
-#[test]
-fn simd_correctness_fast_cosine_dispatch() {
-    for dim in [1, 8, 16, 32, 64, 128, 384, 768] {
-        for seed in 0..5 {
-            let a = test_vec(dim, seed);
-            let b = test_vec(dim, seed + 1000);
-
-            let dispatch_result = fast_cosine_dispatch(&a, &b);
-            let ref_result = ref_cosine(&a, &b);
-
-            // fast_cosine_dispatch uses rsqrt approximation, so wider tolerance
-            assert!(
-                approx_eq(dispatch_result, ref_result, 1e-2),
-                "fast_cosine_dispatch mismatch at dim={}: dispatch={}, ref={}",
-                dim,
-                dispatch_result,
                 ref_result
             );
         }

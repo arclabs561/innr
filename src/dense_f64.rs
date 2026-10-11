@@ -6,10 +6,10 @@
 //! x86_64, NEON on aarch64) with a 4-way-unrolled portable fallback; FMA makes
 //! the f64 paths at least as accurate as the scalar loop.
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::arch;
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 const MIN_DIM_SIMD_F64: usize = 8;
 
 /// Dot product of two `f64` vectors: `Σ(a[i] * b[i])`.
@@ -27,36 +27,35 @@ const MIN_DIM_SIMD_F64: usize = 8;
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len().min(b.len());
-    #[cfg(target_arch = "x86_64")]
-    {
-        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
-            // SAFETY: avx512f verified.
-            return unsafe { arch::x86_64::dot_f64_avx512(a, b) };
-        }
-        if n >= MIN_DIM_SIMD_F64
-            && std::arch::is_x86_feature_detected!("avx2")
-            && std::arch::is_x86_feature_detected!("fma")
-        {
-            // SAFETY: avx2+fma verified.
-            return unsafe { arch::x86_64::dot_f64_avx2(a, b) };
-        }
-    }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
         if n >= MIN_DIM_SIMD_F64 {
-            // SAFETY: NEON is baseline on aarch64.
-            return unsafe { arch::aarch64::dot_f64_neon(a, b) };
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::dot_f64_avx512(simd, a, b);
+            }
+        }
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::dot_f64_avx2(simd, a, b);
+            }
+        }
+    }
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::dot_f64_neon(simd, a, b);
+            }
         }
     }
     dot_f64_portable(a, b)
 }
 
 #[inline]
-fn dot_f64_portable(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn dot_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
@@ -144,36 +143,35 @@ pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
 /// (skips the square root).
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn l2_distance_squared_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len().min(b.len());
-    #[cfg(target_arch = "x86_64")]
-    {
-        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
-            // SAFETY: avx512f verified.
-            return unsafe { arch::x86_64::l2_squared_f64_avx512(a, b) };
-        }
-        if n >= MIN_DIM_SIMD_F64
-            && std::arch::is_x86_feature_detected!("avx2")
-            && std::arch::is_x86_feature_detected!("fma")
-        {
-            // SAFETY: avx2+fma verified.
-            return unsafe { arch::x86_64::l2_squared_f64_avx2(a, b) };
-        }
-    }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
         if n >= MIN_DIM_SIMD_F64 {
-            // SAFETY: NEON is baseline on aarch64.
-            return unsafe { arch::aarch64::l2_squared_f64_neon(a, b) };
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::l2_squared_f64_avx512(simd, a, b);
+            }
+        }
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::l2_squared_f64_avx2(simd, a, b);
+            }
+        }
+    }
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::l2_squared_f64_neon(simd, a, b);
+            }
         }
     }
     l2_distance_squared_f64_portable(a, b)
 }
 
 #[inline]
-fn l2_distance_squared_f64_portable(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn l2_distance_squared_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 
@@ -224,33 +222,35 @@ pub fn l2_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 /// Useful as the convergence criterion for iterative methods (PageRank, k-means).
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn l1_distance_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len().min(b.len());
-    #[cfg(target_arch = "x86_64")]
-    {
-        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx512f") {
-            // SAFETY: avx512f verified.
-            return unsafe { arch::x86_64::l1_f64_avx512(a, b) };
-        }
-        if n >= MIN_DIM_SIMD_F64 && std::arch::is_x86_feature_detected!("avx2") {
-            // SAFETY: avx2 verified.
-            return unsafe { arch::x86_64::l1_f64_avx2(a, b) };
-        }
-    }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
         if n >= MIN_DIM_SIMD_F64 {
-            // SAFETY: NEON is baseline on aarch64.
-            return unsafe { arch::aarch64::l1_f64_neon(a, b) };
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::l1_f64_avx512(simd, a, b);
+            }
+        }
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::l1_f64_avx2(simd, a, b);
+            }
+        }
+    }
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
+    {
+        if n >= MIN_DIM_SIMD_F64 {
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::l1_f64_neon(simd, a, b);
+            }
         }
     }
     l1_distance_f64_portable(a, b)
 }
 
 #[inline]
-fn l1_distance_f64_portable(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn l1_distance_f64_portable(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let chunks = n / 4;
 

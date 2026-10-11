@@ -87,9 +87,13 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
-#![deny(unsafe_op_in_unsafe_fn)]
+#![forbid(unsafe_code)]
 
+#[cfg(feature = "simd")]
 mod arch;
+
+#[cfg(test)]
+mod bit_pins;
 
 /// Binary (1-bit) quantization: encode, Hamming distance, dot product, Jaccard.
 pub mod backend;
@@ -104,8 +108,10 @@ pub mod dense;
 /// / NEON) with a portable fallback.
 pub mod dense_f64;
 
-/// Fast math operations using hardware-aware approximations (rsqrt, NR iteration).
-pub mod fast_math;
+/// Fast math operations using hardware-aware approximations (rsqrt, NR
+/// iteration). Internal since 0.7; no kernel in innr uses it yet.
+#[allow(dead_code)]
+mod fast_math;
 
 /// Batch vector operations with columnar (PDX-style) layout.
 pub mod batch;
@@ -134,9 +140,6 @@ pub use dense::{
 
 // Re-export binary operations
 pub use binary::{binary_dot, binary_hamming, binary_jaccard, encode_binary, PackedBinary};
-
-// Re-export fast math (rsqrt-based approximations)
-pub use fast_math::{fast_cosine, fast_cosine_dispatch, fast_rsqrt, fast_rsqrt_precise};
 
 /// Ternary quantization using a packed 2-bit representation.
 pub mod ternary;
@@ -173,7 +176,7 @@ pub use topk::TopK;
 /// Minimum vector dimension for SIMD to be worthwhile.
 ///
 /// Below this, function call overhead outweighs SIMD benefits.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub(crate) const MIN_DIM_SIMD: usize = 16;
 
 /// Threshold for treating a norm as "effectively zero".

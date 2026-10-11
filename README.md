@@ -10,7 +10,7 @@ scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
 with scalar fallback.
 
 SimSIMD covers more metrics, types and instruction sets through C kernels with
-Rust bindings; innr is pure Rust with no C toolchain or dependencies, and adds
+Rust bindings; innr is pure Rust with no C toolchain, and adds
 quantized, batch and late-interaction kernels.
 
 ## Quickstart
@@ -19,6 +19,9 @@ quantized, batch and late-interaction kernels.
 [dependencies]
 innr = "0.6.3"
 ```
+
+The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
+Set `default-features = false` for dependency-free portable kernels.
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -66,8 +69,6 @@ let result = batch_knn_dot(&query, &batch, 2);
 **Ternary quantization (2-bit storage)**: `ternary::encode_ternary` to {-1, 0, +1}, `ternary_dot`, `ternary_hamming`, `asymmetric_dot` (float query x ternary doc). The packed representation uses two bits per dimension, or 16x less storage than f32.
 
 **Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`; raw f32-by-u8 inner loop via `mixed_dot_u8_f32`. Batch search via `batch_knn_u8`. 4x compression.
-
-**Fast approximate math**: `fast_cosine_dispatch` (SIMD-dispatched), `fast_cosine` (portable Quake III), `fast_rsqrt`, `fast_rsqrt_precise`.
 
 **Batch operations**: `batch::VerticalBatch` (PDX-style columnar layout) with `batch_dot`, `batch_l2_squared`, `batch_l2_squared_pruning`, `batch_cosine`, `batch_norms`, reusable-output `_into` variants for repeated scans, `batch_knn`, `batch_knn_cosine`, `batch_knn_dot`, `batch_knn_filtered` (predicate pushdown), `batch_knn_reordered` (variance-ordered pruning), `batch_knn_adaptive` (approximate early-exit), `batch_dimension_variance`.
 
@@ -133,8 +134,6 @@ cargo bench
 [**binary_demo.rs**](examples/binary_demo.rs): Binary quantization for first-stage retrieval. 32x memory reduction, measures recall@10 against full-precision search.
 
 More in [`examples/`](examples/):
-
-[**fast_math_demo.rs**](examples/fast_math_demo.rs): Newton-Raphson `rsqrt` and a local timing harness for examining the speed/accuracy trade-off.
 
 [**matryoshka_search.rs**](examples/matryoshka_search.rs): MRL progressive search: a coarse pass on a 128d prefix, then a fine pass at full 768d, the cheap-then-precise pattern for large indexes.
 

@@ -29,17 +29,23 @@ include = [
 all-features = true
 
 [features]
-default = []
+default = ["simd"]
+# Runtime-dispatched SIMD kernels (AVX2/AVX-512, NEON) via pulp. Without it
+# innr is dependency-free and uses the portable kernels.
+simd = ["dep:pulp"]
 sparse = []
 # Implements anndists::dist::Distance for the metric types in `distance`,
 # making them usable directly as hnsw_rs distances (hnsw_rs binds to
-# anndists's trait). Off by default to keep the core dependency-free.
+# anndists's trait). Off by default to keep interop dependencies opt-in.
 anndists = ["dep:anndists"]
 
 [dependencies]
-# No dependencies for core operations - just std.
+# With default features off, core operations need only std.
 # anndists is opt-in interop; see the `anndists` feature above.
 anndists = { version = "0.1.5", optional = true }
+# Safe SIMD with runtime dispatch; all of innr's unsafe-free kernels go through
+# its tokens. `x86-v4` adds the AVX-512 token.
+pulp = { version = "0.22.3", features = ["x86-v4"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -77,10 +83,6 @@ name = "maxsim"
 harness = false
 
 [[bench]]
-name = "fast_math"
-harness = false
-
-[[bench]]
 name = "ternary"
 harness = false
 
@@ -90,12 +92,11 @@ harness = false
 
 [lints.rust]
 missing_docs = "warn"
-unsafe_code = "warn"
+unsafe_code = "forbid"
 
 [lints.clippy]
 correctness = { level = "deny", priority = -1 }
 perf = { level = "warn", priority = -1 }
-# AVX-512 intrinsics were stabilized in Rust 1.89, but the code is behind
-# runtime feature detection and target_feature gates. Users on older Rust
-# still get AVX2/NEON/portable paths.
+# SIMD calls go through pulp tokens; Rust 1.89 is also required by
+# slice::as_chunks in the kernels.
 incompatible_msrv = "allow"

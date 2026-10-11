@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Replaced local unsafe SIMD code with safe `pulp` kernels and forbade unsafe
+  code in innr. The new default `simd` feature depends on `pulp`; use
+  `default-features = false` for dependency-free portable kernels.
+- Changed x86 dispatch to require `pulp`'s V3 (x86-64-v3) and V4 (x86-64-v4)
+  feature sets, which require more CPU features than the previous AVX2/FMA and
+  AVX-512 checks. CPUs without these tokens use a lower supported backend.
+- Replaced the AVX-512 Hamming VPOPCNTDQ kernel with an AVX-512BW nibble lookup
+  kernel. Dispatch length thresholds were retained.
+
+### Removed
+
+- Removed the public `fast_math` module and root `fast_cosine`,
+  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports.
+  Use `cosine` for cosine similarity or `1.0 / x.sqrt()` for reciprocal
+  square root where their input contracts match the caller's needs.
+
 ## 0.6.3
 
 - `scalar::mixed_dot_u8_f32`: public SIMD-dispatched f32-by-u8 inner product

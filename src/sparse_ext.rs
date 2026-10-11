@@ -3,8 +3,6 @@
 //! Sparse vectors are represented as sorted `(dimension, weight)` pairs.
 //! All operations assume inputs are sorted by dimension.
 
-#![allow(unsafe_code)]
-
 /// Sparse dot product between two sorted sparse vectors.
 /// Both inputs must be sorted by dimension (first element of tuple).
 ///
@@ -22,11 +20,7 @@ pub fn sparse_dot(a: &[(u32, f32)], b: &[(u32, f32)]) -> f32 {
     let mut s3 = 0.0f32;
     let mut acc_idx = 0usize;
 
-    // SAFETY: bounds are checked by the while condition and the index advances below.
-    while i < a.len() && j < b.len() {
-        // SAFETY: i < a.len() and j < b.len() are guaranteed by the while condition.
-        let ai = unsafe { a.get_unchecked(i) };
-        let bj = unsafe { b.get_unchecked(j) };
+    while let (Some(ai), Some(bj)) = (a.get(i), b.get(j)) {
         let ai_dim = ai.0;
         let bj_dim = bj.0;
 
@@ -60,7 +54,7 @@ pub fn sparse_dot(a: &[(u32, f32)], b: &[(u32, f32)]) -> f32 {
 ///
 /// Uses four independent accumulators to hide FP latency. When all sparse
 /// dimensions are within bounds (the common case), the fast path skips the
-/// per-element bounds check by pre-verifying the maximum dimension once.
+/// per-element filter by pre-verifying the maximum dimension once.
 #[inline]
 pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
     if sparse.is_empty() || dense.is_empty() {
@@ -69,82 +63,53 @@ pub fn sparse_dense_dot(sparse: &[(u32, f32)], dense: &[f32]) -> f32 {
 
     let dense_len = dense.len();
 
-    // True max over all entries, not last(): this is a safe fn, so unsorted
-    // input must not reach the unchecked indexing below.
+    // True max over all entries, not last(): input may be unsorted.
     let max_dim = sparse.iter().map(|&(d, _)| d).max().unwrap() as usize;
 
+    let (quads, tail) = sparse.as_chunks::<4>();
+    let mut s0 = 0.0f32;
+    let mut s1 = 0.0f32;
+    let mut s2 = 0.0f32;
+    let mut s3 = 0.0f32;
+    let mut rest = 0.0f32;
+
     if max_dim < dense_len {
-        // All indices are in-bounds: skip the filter, use unsafe indexing.
-        let mut s0 = 0.0f32;
-        let mut s1 = 0.0f32;
-        let mut s2 = 0.0f32;
-        let mut s3 = 0.0f32;
-        let chunks = sparse.len() / 4;
-
-        for c in 0..chunks {
-            let base = c * 4;
-            // SAFETY: base + 3 < sparse.len() because chunks = sparse.len() / 4.
-            let (d0, w0) = unsafe { *sparse.get_unchecked(base) };
-            let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
-            let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
-            let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
-            // SAFETY: max_dim is the true maximum over all entries and
-            // max_dim < dense_len, so every dim indexes in-bounds.
-            s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
-            s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
-            s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
-            s3 += w3 * unsafe { *dense.get_unchecked(d3 as usize) };
+        // Every dim is in bounds, so the indexing below never panics and the
+        // loop needs no per-element filter.
+        for [(d0, w0), (d1, w1), (d2, w2), (d3, w3)] in quads {
+            s0 += w0 * dense[*d0 as usize];
+            s1 += w1 * dense[*d1 as usize];
+            s2 += w2 * dense[*d2 as usize];
+            s3 += w3 * dense[*d3 as usize];
         }
-
-        // Scalar tail.
-        let tail_start = chunks * 4;
-        let mut tail = 0.0f32;
-        for k in tail_start..sparse.len() {
-            let (dim, weight) = unsafe { *sparse.get_unchecked(k) };
-            tail += weight * unsafe { *dense.get_unchecked(dim as usize) };
+        for (dim, weight) in tail {
+            rest += weight * dense[*dim as usize];
         }
-
-        s0 + s1 + s2 + s3 + tail
     } else {
-        // Slow path: at least one dimension might be out of bounds.
-        let mut s0 = 0.0f32;
-        let mut s1 = 0.0f32;
-        let mut s2 = 0.0f32;
-        let mut s3 = 0.0f32;
-
-        let chunks = sparse.len() / 4;
-        for c in 0..chunks {
-            let base = c * 4;
-            // SAFETY: base + 3 < sparse.len() because chunks = sparse.len() / 4.
-            let (d0, w0) = unsafe { *sparse.get_unchecked(base) };
-            let (d1, w1) = unsafe { *sparse.get_unchecked(base + 1) };
-            let (d2, w2) = unsafe { *sparse.get_unchecked(base + 2) };
-            let (d3, w3) = unsafe { *sparse.get_unchecked(base + 3) };
-            if (d0 as usize) < dense_len {
-                s0 += w0 * unsafe { *dense.get_unchecked(d0 as usize) };
+        // Slow path: at least one dimension is out of bounds; skip those.
+        let at = |d: u32| dense.get(d as usize).copied();
+        for [(d0, w0), (d1, w1), (d2, w2), (d3, w3)] in quads {
+            if let Some(x) = at(*d0) {
+                s0 += w0 * x;
             }
-            if (d1 as usize) < dense_len {
-                s1 += w1 * unsafe { *dense.get_unchecked(d1 as usize) };
+            if let Some(x) = at(*d1) {
+                s1 += w1 * x;
             }
-            if (d2 as usize) < dense_len {
-                s2 += w2 * unsafe { *dense.get_unchecked(d2 as usize) };
+            if let Some(x) = at(*d2) {
+                s2 += w2 * x;
             }
-            if (d3 as usize) < dense_len {
-                s3 += w3 * unsafe { *dense.get_unchecked(d3 as usize) };
+            if let Some(x) = at(*d3) {
+                s3 += w3 * x;
             }
         }
-
-        let tail_start = chunks * 4;
-        let mut tail = 0.0f32;
-        for k in tail_start..sparse.len() {
-            let (dim, weight) = unsafe { *sparse.get_unchecked(k) };
-            if (dim as usize) < dense_len {
-                tail += weight * unsafe { *dense.get_unchecked(dim as usize) };
+        for (dim, weight) in tail {
+            if let Some(x) = at(*dim) {
+                rest += weight * x;
             }
         }
-
-        s0 + s1 + s2 + s3 + tail
     }
+
+    s0 + s1 + s2 + s3 + rest
 }
 
 /// L2 norm of a sparse vector.
@@ -222,6 +187,47 @@ mod tests {
     }
 
     use super::*;
+
+    /// Both paths of `sparse_dense_dot`, and `sparse_dot`, against a naive
+    /// reference at lengths that hit the 4-wide body and the tail.
+    #[test]
+    fn sparse_kernels_match_naive_on_odd_lengths() {
+        for n in [0usize, 1, 7, 8, 9, 31, 33] {
+            let a: Vec<(u32, f32)> = (0..n as u32)
+                .map(|i| (i * 3, i as f32 * 0.5 - 2.0))
+                .collect();
+            let b: Vec<(u32, f32)> = (0..n as u32)
+                .map(|i| (i * 2, i as f32 * 0.25 + 1.0))
+                .collect();
+            let dense: Vec<f32> = (0..64).map(|i| (i as f32).sin()).collect();
+            // Every third dim of `a` is 3*i < 3*33, so dense of len 64 forces
+            // the slow path once n > 22; dense of len 128 always takes the fast path.
+            let big: Vec<f32> = (0..128).map(|i| (i as f32).cos()).collect();
+
+            let naive_sd = |d: &[f32]| -> f32 {
+                a.iter()
+                    .filter_map(|&(i, w)| d.get(i as usize).map(|x| w * x))
+                    .sum()
+            };
+            let naive_ss: f32 = a
+                .iter()
+                .filter_map(|&(i, w)| b.iter().find(|p| p.0 == i).map(|p| w * p.1))
+                .sum();
+
+            for d in [&dense, &big] {
+                let got = sparse_dense_dot(&a, d);
+                assert!(
+                    (got - naive_sd(d)).abs() < 1e-4,
+                    "dense len={} n={n}",
+                    d.len()
+                );
+            }
+            assert!(
+                (sparse_dot(&a, &b) - naive_ss).abs() < 1e-4,
+                "sparse_dot n={n}"
+            );
+        }
+    }
 
     #[test]
     fn test_sparse_dot_no_overlap() {

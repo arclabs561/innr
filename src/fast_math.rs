@@ -128,27 +128,23 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
-#[allow(unsafe_code)]
 #[allow(clippy::incompatible_msrv)]
 pub(crate) mod x86_64 {
     //! AVX2/AVX-512 fast cosine using rsqrt instructions.
+
+    use crate::arch::x86_64::{ld256_f32, ld512_f32};
 
     /// AVX-512 fast cosine with hardware rsqrt + Newton-Raphson.
     ///
     /// Uses SSE `rsqrtps` for ~12-bit initial estimate, then one NR iteration.
     /// We use `_mm_rsqrt_ps` (SSE) rather than `_mm512_rsqrt14_ps` to avoid
     /// requiring AVX-512VL; SSE is always available when AVX-512F is present.
-    ///
-    /// # Safety
-    ///
-    /// Requires AVX-512F. Caller must verify via `is_x86_feature_detected!`.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx512f")]
-    pub unsafe fn fast_cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
+    pub fn fast_cosine_avx512(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::x86_64::{
             __m512,
             _mm512_fmadd_ps,
-            _mm512_loadu_ps,
             _mm512_reduce_add_ps,
             _mm512_setzero_ps,
             // SSE intrinsics for final rsqrt
@@ -166,19 +162,17 @@ pub(crate) mod x86_64 {
             return 0.0;
         }
 
-        let a_ptr = a.as_ptr();
-        let b_ptr = b.as_ptr();
+        let (a16, a_tail) = a[..n].as_chunks::<16>();
+        let (b16, b_tail) = b[..n].as_chunks::<16>();
 
         let mut ab_sum: __m512 = _mm512_setzero_ps();
         let mut aa_sum: __m512 = _mm512_setzero_ps();
         let mut bb_sum: __m512 = _mm512_setzero_ps();
 
         // Process 16 floats at a time
-        let chunks = n / 16;
-        for i in 0..chunks {
-            let offset = i * 16;
-            let va = _mm512_loadu_ps(a_ptr.add(offset));
-            let vb = _mm512_loadu_ps(b_ptr.add(offset));
+        for (qa, qb) in a16.iter().zip(b16) {
+            let va = ld512_f32(qa);
+            let vb = ld512_f32(qb);
 
             ab_sum = _mm512_fmadd_ps(va, vb, ab_sum);
             aa_sum = _mm512_fmadd_ps(va, va, aa_sum);
@@ -191,12 +185,7 @@ pub(crate) mod x86_64 {
         let mut bb = _mm512_reduce_add_ps(bb_sum);
 
         // Handle tail
-        let tail_start = chunks * 16;
-        for i in tail_start..n {
-            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
-            // so i is always a valid index into both a and b.
-            let ai = *a.get_unchecked(i);
-            let bi = *b.get_unchecked(i);
+        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
             ab += ai * bi;
             aa += ai * ai;
             bb += bi * bi;
@@ -227,18 +216,13 @@ pub(crate) mod x86_64 {
     ///
     /// Uses SSE `_mm_rsqrt_ps` for ~12-bit initial estimate, then one
     /// Newton-Raphson iteration for ~24 bits of accuracy.
-    ///
-    /// # Safety
-    ///
-    /// Requires AVX2 + FMA. Caller must verify via runtime detection.
     #[cfg(target_arch = "x86_64")]
     #[target_feature(enable = "avx2", enable = "fma")]
-    pub unsafe fn fast_cosine_avx2(a: &[f32], b: &[f32]) -> f32 {
+    pub fn fast_cosine_avx2(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::x86_64::{
             __m256, _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps,
-            _mm256_loadu_ps, _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32,
-            _mm_movehl_ps, _mm_mul_ps, _mm_rsqrt_ps, _mm_set1_ps, _mm_set_ps, _mm_shuffle_ps,
-            _mm_sub_ps,
+            _mm256_setzero_ps, _mm_add_ps, _mm_add_ss, _mm_cvtss_f32, _mm_movehl_ps, _mm_mul_ps,
+            _mm_rsqrt_ps, _mm_set1_ps, _mm_set_ps, _mm_shuffle_ps, _mm_sub_ps,
         };
 
         let n = a.len().min(b.len());
@@ -246,19 +230,17 @@ pub(crate) mod x86_64 {
             return 0.0;
         }
 
-        let a_ptr = a.as_ptr();
-        let b_ptr = b.as_ptr();
+        let (a8, a_tail) = a[..n].as_chunks::<8>();
+        let (b8, b_tail) = b[..n].as_chunks::<8>();
 
         let mut ab_sum: __m256 = _mm256_setzero_ps();
         let mut aa_sum: __m256 = _mm256_setzero_ps();
         let mut bb_sum: __m256 = _mm256_setzero_ps();
 
         // Process 8 floats at a time
-        let chunks = n / 8;
-        for i in 0..chunks {
-            let offset = i * 8;
-            let va = _mm256_loadu_ps(a_ptr.add(offset));
-            let vb = _mm256_loadu_ps(b_ptr.add(offset));
+        for (qa, qb) in a8.iter().zip(b8) {
+            let va = ld256_f32(qa);
+            let vb = ld256_f32(qb);
 
             ab_sum = _mm256_fmadd_ps(va, vb, ab_sum);
             aa_sum = _mm256_fmadd_ps(va, va, aa_sum);
@@ -266,8 +248,9 @@ pub(crate) mod x86_64 {
         }
 
         // Horizontal reduction helper
-        #[inline(always)]
-        unsafe fn hsum256(v: __m256) -> f32 {
+        #[inline]
+        #[target_feature(enable = "avx")]
+        fn hsum256(v: __m256) -> f32 {
             let hi = _mm256_extractf128_ps(v, 1);
             let lo = _mm256_castps256_ps128(v);
             let sum128 = _mm_add_ps(lo, hi);
@@ -281,12 +264,7 @@ pub(crate) mod x86_64 {
         let mut bb = hsum256(bb_sum);
 
         // Handle tail
-        let tail_start = chunks * 8;
-        for i in tail_start..n {
-            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
-            // so i is always a valid index into both a and b.
-            let ai = *a.get_unchecked(i);
-            let bi = *b.get_unchecked(i);
+        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
             ab += ai * bi;
             aa += ai * ai;
             bb += bi * bi;
@@ -315,23 +293,20 @@ pub(crate) mod x86_64 {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(unsafe_code)]
 pub(crate) mod aarch64 {
     //! NEON fast cosine using vrsqrte + Newton-Raphson.
+
+    use crate::arch::aarch64::ld_f32;
 
     /// NEON fast cosine with 4-way unrolled accumulation and hardware rsqrt.
     ///
     /// Uses `vrsqrteq_f32` + two `vrsqrtsq_f32` Newton-Raphson iterations for
     /// the final normalization, avoiding scalar/SIMD transitions entirely.
-    ///
-    /// # Safety
-    ///
-    /// NEON is always available on aarch64.
     #[target_feature(enable = "neon")]
-    pub unsafe fn fast_cosine_neon(a: &[f32], b: &[f32]) -> f32 {
+    pub fn fast_cosine_neon(a: &[f32], b: &[f32]) -> f32 {
         use std::arch::aarch64::{
             float32x2_t, float32x4_t, vaddq_f32, vaddvq_f32, vdup_n_f32, vdupq_n_f32, vfmaq_f32,
-            vget_lane_f32, vld1q_f32, vmul_f32, vrsqrte_f32, vrsqrts_f32,
+            vget_lane_f32, vmul_f32, vrsqrte_f32, vrsqrts_f32, vset_lane_f32,
         };
 
         let n = a.len().min(b.len());
@@ -339,11 +314,12 @@ pub(crate) mod aarch64 {
             return 0.0;
         }
 
-        let a_ptr = a.as_ptr();
-        let b_ptr = b.as_ptr();
+        let (a4, a_tail) = a[..n].as_chunks::<4>();
+        let (b4, b_tail) = b[..n].as_chunks::<4>();
+        let (a16, a_rem) = a4.as_chunks::<4>();
+        let (b16, b_rem) = b4.as_chunks::<4>();
 
         // 4-way unrolled: process 16 floats per iteration
-        let chunks_16 = n / 16;
         let mut ab0: float32x4_t = vdupq_n_f32(0.0);
         let mut ab1: float32x4_t = vdupq_n_f32(0.0);
         let mut ab2: float32x4_t = vdupq_n_f32(0.0);
@@ -357,16 +333,11 @@ pub(crate) mod aarch64 {
         let mut bb2: float32x4_t = vdupq_n_f32(0.0);
         let mut bb3: float32x4_t = vdupq_n_f32(0.0);
 
-        for i in 0..chunks_16 {
-            let base = i * 16;
-            let va0 = vld1q_f32(a_ptr.add(base));
-            let vb0 = vld1q_f32(b_ptr.add(base));
-            let va1 = vld1q_f32(a_ptr.add(base + 4));
-            let vb1 = vld1q_f32(b_ptr.add(base + 4));
-            let va2 = vld1q_f32(a_ptr.add(base + 8));
-            let vb2 = vld1q_f32(b_ptr.add(base + 8));
-            let va3 = vld1q_f32(a_ptr.add(base + 12));
-            let vb3 = vld1q_f32(b_ptr.add(base + 12));
+        for ([a0, a1, a2, a3], [b0, b1, b2, b3]) in a16.iter().zip(b16) {
+            let (va0, vb0) = (ld_f32(a0), ld_f32(b0));
+            let (va1, vb1) = (ld_f32(a1), ld_f32(b1));
+            let (va2, vb2) = (ld_f32(a2), ld_f32(b2));
+            let (va3, vb3) = (ld_f32(a3), ld_f32(b3));
 
             ab0 = vfmaq_f32(ab0, va0, vb0);
             ab1 = vfmaq_f32(ab1, va1, vb1);
@@ -394,18 +365,12 @@ pub(crate) mod aarch64 {
         let mut bb = vaddvq_f32(bb_sum);
 
         // Handle remaining 4-float chunks
-        let remaining_start = chunks_16 * 16;
-        let remaining = n - remaining_start;
-        let chunks_4 = remaining / 4;
-
         let mut ab_tail: float32x4_t = vdupq_n_f32(0.0);
         let mut aa_tail: float32x4_t = vdupq_n_f32(0.0);
         let mut bb_tail: float32x4_t = vdupq_n_f32(0.0);
 
-        for i in 0..chunks_4 {
-            let offset = remaining_start + i * 4;
-            let va = vld1q_f32(a_ptr.add(offset));
-            let vb = vld1q_f32(b_ptr.add(offset));
+        for (qa, qb) in a_rem.iter().zip(b_rem) {
+            let (va, vb) = (ld_f32(qa), ld_f32(qb));
             ab_tail = vfmaq_f32(ab_tail, va, vb);
             aa_tail = vfmaq_f32(aa_tail, va, va);
             bb_tail = vfmaq_f32(bb_tail, vb, vb);
@@ -416,12 +381,7 @@ pub(crate) mod aarch64 {
         bb += vaddvq_f32(bb_tail);
 
         // Scalar tail
-        let tail_start = remaining_start + chunks_4 * 4;
-        for i in tail_start..n {
-            // SAFETY: i is in tail_start..n where n = a.len().min(b.len()),
-            // so i is always a valid index into both a and b.
-            let ai = *a.get_unchecked(i);
-            let bi = *b.get_unchecked(i);
+        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
             ab += ai * bi;
             aa += ai * ai;
             bb += bi * bi;
@@ -433,8 +393,8 @@ pub(crate) mod aarch64 {
             // then extract and multiply. This avoids scalar/SIMD transitions.
             let norms: float32x2_t = vdup_n_f32(0.0);
             // Load aa into lane 0, bb into lane 1
-            let norms = vset_lane_f32_0(aa, norms);
-            let norms = vset_lane_f32_1(bb, norms);
+            let norms = vset_lane_f32::<0>(aa, norms);
+            let norms = vset_lane_f32::<1>(bb, norms);
 
             // Initial estimate (~8-12 bits)
             let mut est: float32x2_t = vrsqrte_f32(norms);
@@ -451,26 +411,6 @@ pub(crate) mod aarch64 {
         } else {
             0.0
         }
-    }
-
-    /// Set lane 0 of a float32x2_t. Helper to avoid inline asm complexity.
-    #[inline(always)]
-    unsafe fn vset_lane_f32_0(
-        val: f32,
-        vec: std::arch::aarch64::float32x2_t,
-    ) -> std::arch::aarch64::float32x2_t {
-        use std::arch::aarch64::vset_lane_f32;
-        vset_lane_f32::<0>(val, vec)
-    }
-
-    /// Set lane 1 of a float32x2_t. Helper to avoid inline asm complexity.
-    #[inline(always)]
-    unsafe fn vset_lane_f32_1(
-        val: f32,
-        vec: std::arch::aarch64::float32x2_t,
-    ) -> std::arch::aarch64::float32x2_t {
-        use std::arch::aarch64::vset_lane_f32;
-        vset_lane_f32::<1>(val, vec)
     }
 }
 

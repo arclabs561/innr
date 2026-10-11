@@ -251,8 +251,7 @@ fn ternary_dot_portable(a: &[u64], b: &[u64]) -> i32 {
 /// x86_64 POPCNT implementation.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "popcnt")]
-#[allow(unsafe_code)]
-unsafe fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
+fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
     use std::arch::x86_64::_popcnt64;
 
     let mut same_count: i64 = 0;

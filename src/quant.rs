@@ -55,7 +55,6 @@ const MAX_U32_DOT_DIM: usize = u32::MAX as usize / (u8::MAX as usize * u8::MAX a
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn dot_u8(a: &[u8], b: &[u8]) -> u32 {
     assert_eq!(
         a.len(),
@@ -78,7 +77,6 @@ pub fn dot_u8(a: &[u8], b: &[u8]) -> u32 {
 /// Panics if `a.len() != b.len()` or the exact result exceeds `u64::MAX`.
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn dot_u8_wide(a: &[u8], b: &[u8]) -> u64 {
     assert_eq!(
         a.len(),

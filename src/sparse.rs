@@ -46,7 +46,6 @@
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn sparse_dot(a_indices: &[u32], a_values: &[f32], b_indices: &[u32], b_values: &[f32]) -> f32 {
     assert_eq!(
         a_indices.len(),

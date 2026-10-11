@@ -87,6 +87,7 @@
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 mod arch;
 

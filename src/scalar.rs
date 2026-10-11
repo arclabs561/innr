@@ -257,7 +257,6 @@ pub fn query_context(query: &[f32]) -> QueryContext {
 ///
 /// Panics if `query.len() != quantized.dimension()`.
 #[must_use]
-#[allow(unsafe_code)]
 pub fn asymmetric_dot_u8(
     query: &[f32],
     quantized: &QuantizedU8,
@@ -280,7 +279,6 @@ pub fn asymmetric_dot_u8(
 /// Use this in batch scoring loops where `query_context()` is computed
 /// once per query and reused across all corpus vectors.
 #[must_use]
-#[allow(unsafe_code)]
 pub fn asymmetric_dot_u8_precomputed(
     query: &[f32],
     quantized: &QuantizedU8,
@@ -310,7 +308,6 @@ pub fn asymmetric_dot_u8_precomputed(
 /// Panics if `a.len() != b.len()`.
 #[must_use]
 #[inline]
-#[allow(unsafe_code)]
 pub fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
     assert_eq!(
         a.len(),

@@ -1,9 +1,11 @@
 #![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 
 //! Bit-exact pins: outputs of the 917749d kernels (the last std::arch
-//! version) on fixed fixtures. The pulp port reproduces each kernel's
-//! instruction sequence and accumulation order, so these must match to the
-//! bit; a change here means a numeric change consumers would see.
+//! version) on fixed fixtures. These pins check deterministic outputs on the
+//! recorded backend. SIMD fast cosine uses hardware reciprocal-square-root
+//! estimates, whose bits need not agree across CPUs or emulation; it is checked
+//! against the documented accuracy bound instead. These fixtures do not prove
+//! bit identity for every kernel on every platform.
 //!
 //! Pins were produced on aarch64 (NEON) and on x86_64 under Rosetta
 //! (AVX2+FMA, no AVX-512). AVX-512 paths are not pinned: on a machine without
@@ -259,11 +261,24 @@ fn fixtures() -> Vec<(&'static str, usize, u64)> {
             u64::from(scalar::mixed_dot_u8_f32(&a, &u).to_bits()),
         ));
         out.push(("maxsim", n, u64::from(maxsim(&q, &d).to_bits())));
-        out.push((
-            "fast_cosine",
-            n,
-            u64::from(crate::fast_math::fast_cosine_dispatch(&a, &b).to_bits()),
-        ));
+        let fast_cosine = crate::fast_math::fast_cosine_dispatch(&a, &b);
+        // Independent mathematical reference, not another Innr cosine kernel.
+        // These fixed nonzero inputs exercise whichever backend dispatch selects,
+        // including the portable fallback. Preserve the existing absolute 0.01
+        // fast-cosine accuracy contract even where exact SIMD pins do not apply.
+        let dot: f64 = a
+            .iter()
+            .zip(&b)
+            .map(|(&x, &y)| f64::from(x) * f64::from(y))
+            .sum();
+        let aa: f64 = a.iter().map(|&x| f64::from(x).powi(2)).sum();
+        let bb: f64 = b.iter().map(|&x| f64::from(x).powi(2)).sum();
+        let reference = dot / (aa * bb).sqrt();
+        assert!(
+            (f64::from(fast_cosine) - reference).abs() < 0.01,
+            "fast_cosine accuracy n={n}: {fast_cosine} vs {reference}"
+        );
+        out.push(("fast_cosine", n, u64::from(fast_cosine.to_bits())));
         out.push(("dot_f64", n, dense_f64::dot_f64(&da, &db).to_bits()));
         out.push(("cosine_f64", n, dense_f64::cosine_f64(&da, &db).to_bits()));
         out.push((
@@ -338,6 +353,11 @@ fn outputs_match_917749d_bit_for_bit() {
 
     let mut checked = 0;
     for (name, n, got) in fixtures() {
+        // Keep the historical values as provenance, but hardware rsqrt estimates
+        // are not a cross-machine bit oracle. Portable fast cosine remains pinned.
+        if cfg!(feature = "simd") && name == "fast_cosine" {
+            continue;
+        }
         if !dispatch_matches && (!name.starts_with("p_") || name == "p_maxsim") {
             continue;
         }
@@ -364,7 +384,7 @@ fn outputs_match_917749d_bit_for_bit() {
         if !dispatch_matches {
             45
         } else if cfg!(feature = "simd") {
-            105
+            100
         } else {
             90
         }

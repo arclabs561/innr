@@ -21,12 +21,9 @@
 - Replaced the AVX-512 Hamming VPOPCNTDQ kernel with an AVX-512BW nibble lookup
   kernel. Dispatch length thresholds were retained.
 
-### Removed
-
-- Removed the public `fast_math` module and root `fast_cosine`,
-  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports.
-  Use `cosine` for cosine similarity or `1.0 / x.sqrt()` for reciprocal
-  square root where their input contracts match the caller's needs.
+- Preserve the public `fast_math` module and root `fast_cosine`,
+  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports with
+  safe implementations, including the existing length-mismatch panic contracts.
 
 ## 0.6.3
 

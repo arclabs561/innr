@@ -45,7 +45,8 @@ anndists = ["dep:anndists"]
 anndists = { version = "0.1.5", optional = true }
 # Safe SIMD with runtime dispatch; all of innr's unsafe-free kernels go through
 # its tokens. `x86-v4` adds the AVX-512 token.
-pulp = { version = "0.22.3", features = ["x86-v4"], optional = true }
+# Development-only immutable pin; registry publication requires a published replacement.
+pulp = { git = "https://github.com/sarah-quinones/pulp", rev = "601de0c071ba32df3fd7ff33fc4218c9bd712aba", features = ["x86-v4"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

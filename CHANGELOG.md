@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Pinned the development SIMD dependency to upstream Pulp commit
+  `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, using `pastey`, without an
+  advisory exception. Registry publication remains gated on a published
+  replacement and release validation; dependency internals still use unsafe Rust.
 - Replaced local unsafe SIMD code with safe `pulp` kernels and forbade unsafe
   code in innr. The new default `simd` feature depends on `pulp`; use
   `default-features = false` for dependency-free portable kernels.

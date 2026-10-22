@@ -23,6 +23,13 @@ innr = "0.6.3"
 The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
 Set `default-features = false` for dependency-free portable kernels.
 
+This development branch pins Pulp to commit
+`601de0c071ba32df3fd7ff33fc4218c9bd712aba`, which uses `pastey`.
+This dependency configuration is not ready for crates.io publication; a
+published replacement and release validation are still required. Innr forbids
+locally authored unsafe Rust; Pulp uses unsafe code internally behind its safe
+API. This does not make the dependency tree unsafe-free.
+
 ```rust
 use innr::{dot, cosine, norm};
 

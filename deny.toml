@@ -41,7 +41,8 @@ external-default-features = "allow"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Only the upstream repository used by the immutable development pin.
+allow-git = ["https://github.com/sarah-quinones/pulp"]
 
 [sources.allow-org]
 github = ["arclabs561"]

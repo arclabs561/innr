@@ -134,20 +134,14 @@ Better accuracy than symmetric (ternary × ternary).
 
 **Solution**: Profile. innr automatically falls back when SIMD isn't beneficial.
 
-### 2. Expecting fast_cosine to always be faster
-
-**Problem**: `fast_cosine` uses rsqrt approximation, which helps when sqrt is the bottleneck. On Apple Silicon with fast native sqrt, the benefit is smaller.
-
-**Solution**: Profile your actual workload. For pre-normalized vectors, just use `dot()`.
-
-### 3. Wrong threshold for ternary
+### 2. Wrong threshold for ternary
 
 **Problem**: Threshold too high → mostly zeros → poor discrimination.
 Threshold too low → mostly ±1 → loses information.
 
 **Solution**: For normalized embeddings, threshold ≈ 0.2-0.4 works well. Use `compute_threshold()` for adaptive selection.
 
-### 4. Expecting ternary to preserve exact similarities
+### 3. Expecting ternary to preserve exact similarities
 
 **Problem**: Ternary is lossy. Don't expect identical rankings.
 
@@ -161,5 +155,4 @@ Threshold too low → mostly ±1 → loses information.
 |---------|-------------|
 | `01_basic_ops` | Core similarity operations |
 | `batch_demo` | Batch scan and k-NN helpers |
-| `fast_math_demo` | rsqrt approximation accuracy |
 | `ternary_demo` | Compression, speed, quality tradeoffs |

@@ -33,7 +33,7 @@
 //!   with quantile-based range selection
 
 // arch is only used on architectures with SIMD dispatch
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::arch;
 
 /// Quantization parameters for a collection of vectors.
@@ -320,24 +320,25 @@ pub fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
 }
 
 #[inline]
-#[allow(unsafe_code)]
 fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len().min(b.len());
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= 16 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            // SAFETY: AVX2 and FMA verified via runtime detection.
-            return unsafe { arch::x86_64::dot_u8_f32_avx2(a, b) };
+        if n >= 16 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::dot_u8_f32_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= 16 {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::dot_u8_f32_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::dot_u8_f32_neon(simd, a, b);
+            }
         }
     }
 
@@ -347,7 +348,7 @@ fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
 
 /// Portable mixed-precision dot product.
 #[inline]
-fn mixed_dot_u8_f32_portable(a: &[f32], b: &[u8]) -> f32 {
+pub(crate) fn mixed_dot_u8_f32_portable(a: &[f32], b: &[u8]) -> f32 {
     a.iter()
         .zip(b.iter())
         .map(|(&af, &bu)| af * bu as f32)

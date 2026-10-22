@@ -48,15 +48,15 @@
 //! auto-vectorization of the integer-compare loop.
 
 // arch is only used on architectures with SIMD dispatch
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::arch;
 
 /// Minimum slot count for the AVX2 / NEON paths to be worthwhile.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub(crate) const MIN_SLOTS_SIMD: usize = 8;
 
 /// Minimum slot count for the AVX-512 path (16 lanes).
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub(crate) const MIN_SLOTS_AVX512: usize = 16;
 
 /// Integer-slot Hamming distance over `u32` slots: the number of positions
@@ -91,7 +91,6 @@ pub(crate) const MIN_SLOTS_AVX512: usize = 16;
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn slot_hamming_u32(a: &[u32], b: &[u32]) -> u32 {
     assert_eq!(
         a.len(),
@@ -101,27 +100,30 @@ pub fn slot_hamming_u32(a: &[u32], b: &[u32]) -> u32 {
         b.len()
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= MIN_SLOTS_AVX512 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::slot_hamming_u32_avx512(a, b) };
+        if n >= MIN_SLOTS_AVX512 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::slot_hamming_u32_avx512(simd, a, b);
+            }
         }
 
-        if n >= MIN_SLOTS_SIMD && is_x86_feature_detected!("avx2") {
-            // SAFETY: AVX2 verified via runtime detection.
-            return unsafe { arch::x86_64::slot_hamming_u32_avx2(a, b) };
+        if n >= MIN_SLOTS_SIMD {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::slot_hamming_u32_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= MIN_SLOTS_SIMD {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::slot_hamming_u32_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::slot_hamming_u32_neon(simd, a, b);
+            }
         }
     }
 
@@ -154,7 +156,6 @@ pub fn slot_hamming_u32_portable(a: &[u32], b: &[u32]) -> u32 {
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
     assert_eq!(
         a.len(),
@@ -163,24 +164,27 @@ pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
         a.len(),
         b.len()
     );
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= 32 && is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw") {
-            // SAFETY: avx512f+bw verified.
-            return unsafe { arch::x86_64::slot_hamming_u16_avx512(a, b) };
+        if n >= 32 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::slot_hamming_u16_avx512(simd, a, b);
+            }
         }
-        if n >= 16 && is_x86_feature_detected!("avx2") {
-            // SAFETY: avx2 verified.
-            return unsafe { arch::x86_64::slot_hamming_u16_avx2(a, b) };
+        if n >= 16 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::slot_hamming_u16_avx2(simd, a, b);
+            }
         }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= 8 {
-            // SAFETY: NEON is baseline on aarch64.
-            return unsafe { arch::aarch64::slot_hamming_u16_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::slot_hamming_u16_neon(simd, a, b);
+            }
         }
     }
     #[allow(unreachable_code)]
@@ -205,7 +209,6 @@ pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn slot_hamming_u64(a: &[u64], b: &[u64]) -> u64 {
     assert_eq!(
         a.len(),
@@ -214,24 +217,27 @@ pub fn slot_hamming_u64(a: &[u64], b: &[u64]) -> u64 {
         a.len(),
         b.len()
     );
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= 8 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: avx512f verified.
-            return unsafe { arch::x86_64::slot_hamming_u64_avx512(a, b) };
+        if n >= 8 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::slot_hamming_u64_avx512(simd, a, b);
+            }
         }
-        if n >= 4 && is_x86_feature_detected!("avx2") {
-            // SAFETY: avx2 verified.
-            return unsafe { arch::x86_64::slot_hamming_u64_avx2(a, b) };
+        if n >= 4 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::slot_hamming_u64_avx2(simd, a, b);
+            }
         }
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= 2 {
-            // SAFETY: NEON is baseline on aarch64.
-            return unsafe { arch::aarch64::slot_hamming_u64_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::slot_hamming_u64_neon(simd, a, b);
+            }
         }
     }
     #[allow(unreachable_code)]

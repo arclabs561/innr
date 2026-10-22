@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Require Rust 1.94 for the development Pulp revision's x86 intrinsics, and
+  document the full Pulp V3/V4 CPU requirements. The extended property CI job
+  now selects its named integration targets instead of an empty name filter;
+  explicit test-local case limits remain in effect.
 - Pinned the development SIMD dependency to upstream Pulp commit
   `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, using `pastey`, without an
   advisory exception. Registry publication remains gated on a published

@@ -22,8 +22,8 @@
 //!
 //! | Architecture | Instructions | Detection |
 //! |--------------|--------------|-----------|
-//! | x86_64 | AVX-512F | Runtime |
-//! | x86_64 | AVX2 + FMA | Runtime |
+//! | x86_64 | x86-64-v4 (Pulp V4, including AVX-512) | Runtime |
+//! | x86_64 | x86-64-v3 (Pulp V3, including AVX2 + FMA) | Runtime |
 //! | aarch64 | NEON | Always available |
 //! | Other | Portable | LLVM auto-vectorizes |
 //!

@@ -103,12 +103,12 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 
 | Architecture | Instructions | Detection |
 |--------------|--------------|-----------|
-| x86_64 | AVX-512F | Runtime |
-| x86_64 | AVX2 + FMA | Runtime |
+| x86_64 | x86-64-v4 (Pulp V4, including AVX-512) | Runtime |
+| x86_64 | x86-64-v3 (Pulp V3, including AVX2 + FMA) | Runtime |
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). The crate's MSRV is Rust 1.89.
+Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). This development branch requires Rust 1.94 for the pinned Pulp backend's x86 intrinsics.
 
 ## Performance
 

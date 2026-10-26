@@ -49,7 +49,7 @@ anndists = { version = "0.1.5", optional = true }
 pulp = { git = "https://github.com/sarah-quinones/pulp", rev = "601de0c071ba32df3fd7ff33fc4218c9bd712aba", features = ["x86-v4"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1.5"
 qntz = { version = "0.2.1", features = ["rabitq"] }
 rand = "0.9"

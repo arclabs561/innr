@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Require Rust 1.94 for the development Pulp revision's x86 intrinsics, and
+  document the full Pulp V3/V4 CPU requirements. The extended property CI job
+  now selects its named integration targets instead of an empty name filter;
+  explicit test-local case limits remain in effect.
+- Pinned the development SIMD dependency to upstream Pulp commit
+  `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, using `pastey`, without an
+  advisory exception. Registry publication remains gated on a published
+  replacement and release validation; dependency internals still use unsafe Rust.
+- Replaced local unsafe SIMD code with safe `pulp` kernels and forbade unsafe
+  code in innr. The new default `simd` feature depends on `pulp`; use
+  `default-features = false` for dependency-free portable kernels.
+- Changed x86 dispatch to require `pulp`'s V3 (x86-64-v3) and V4 (x86-64-v4)
+  feature sets, which require more CPU features than the previous AVX2/FMA and
+  AVX-512 checks. CPUs without these tokens use a lower supported backend.
+- Replaced the AVX-512 Hamming VPOPCNTDQ kernel with an AVX-512BW nibble lookup
+  kernel. Dispatch length thresholds were retained.
+
+- Preserve the public `fast_math` module and root `fast_cosine`,
+  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports with
+  safe implementations, including the existing length-mismatch panic contracts.
+
 ## 0.6.3
 
 - `scalar::mixed_dot_u8_f32`: public SIMD-dispatched f32-by-u8 inner product

@@ -10,7 +10,7 @@ scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
 with scalar fallback.
 
 SimSIMD covers more metrics, types and instruction sets through C kernels with
-Rust bindings; innr is pure Rust with no C toolchain or dependencies, and adds
+Rust bindings; innr is pure Rust with no C toolchain, and adds
 quantized, batch and late-interaction kernels.
 
 ## Quickstart
@@ -19,6 +19,16 @@ quantized, batch and late-interaction kernels.
 [dependencies]
 innr = "0.6.3"
 ```
+
+The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
+Set `default-features = false` for dependency-free portable kernels.
+
+This development branch pins Pulp to commit
+`601de0c071ba32df3fd7ff33fc4218c9bd712aba`, which uses `pastey`.
+This dependency configuration is not ready for crates.io publication; a
+published replacement and release validation are still required. Innr forbids
+locally authored unsafe Rust; Pulp uses unsafe code internally behind its safe
+API. This does not make the dependency tree unsafe-free.
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -67,8 +77,6 @@ let result = batch_knn_dot(&query, &batch, 2);
 
 **Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`; raw f32-by-u8 inner loop via `mixed_dot_u8_f32`. Batch search via `batch_knn_u8`. 4x compression.
 
-**Fast approximate math**: `fast_cosine_dispatch` (SIMD-dispatched), `fast_cosine` (portable Quake III), `fast_rsqrt`, `fast_rsqrt_precise`.
-
 **Batch operations**: `batch::VerticalBatch` (PDX-style columnar layout) with `batch_dot`, `batch_l2_squared`, `batch_l2_squared_pruning`, `batch_cosine`, `batch_norms`, reusable-output `_into` variants for repeated scans, `batch_knn`, `batch_knn_cosine`, `batch_knn_dot`, `batch_knn_filtered` (predicate pushdown), `batch_knn_reordered` (variance-ordered pruning), `batch_knn_adaptive` (approximate early-exit), `batch_dimension_variance`.
 
 **Sparse vectors**: `sparse_dot`.
@@ -95,12 +103,12 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 
 | Architecture | Instructions | Detection |
 |--------------|--------------|-----------|
-| x86_64 | AVX-512F | Runtime |
-| x86_64 | AVX2 + FMA | Runtime |
+| x86_64 | x86-64-v4 (Pulp V4, including AVX-512) | Runtime |
+| x86_64 | x86-64-v3 (Pulp V3, including AVX2 + FMA) | Runtime |
 | aarch64 | NEON | Always |
 | Other | Portable | LLVM auto-vec |
 
-Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). The crate's MSRV is Rust 1.89.
+Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). This development branch requires Rust 1.94 for the pinned Pulp backend's x86 intrinsics.
 
 ## Performance
 
@@ -133,8 +141,6 @@ cargo bench
 [**binary_demo.rs**](examples/binary_demo.rs): Binary quantization for first-stage retrieval. 32x memory reduction, measures recall@10 against full-precision search.
 
 More in [`examples/`](examples/):
-
-[**fast_math_demo.rs**](examples/fast_math_demo.rs): Newton-Raphson `rsqrt` and a local timing harness for examining the speed/accuracy trade-off.
 
 [**matryoshka_search.rs**](examples/matryoshka_search.rs): MRL progressive search: a coarse pass on a 128d prefix, then a fine pass at full 768d, the cheap-then-precise pattern for large indexes.
 

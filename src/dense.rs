@@ -14,15 +14,15 @@
 //! | Portable | any | 1x (baseline) |
 
 // arch is only used on architectures with SIMD dispatch
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::arch;
 
 // MIN_DIM_SIMD is only used on architectures with SIMD dispatch
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::MIN_DIM_SIMD;
 
 /// Minimum dimension for AVX-512 (64 floats = one unrolled iteration).
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
 pub(crate) const MIN_DIM_AVX512: usize = 64;
 
 /// Dot product of two vectors: `Σ(a[i] * b[i])`.
@@ -52,7 +52,6 @@ pub(crate) const MIN_DIM_AVX512: usize = 64;
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn dot(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -62,30 +61,32 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
         // Prefer AVX-512 for large vectors (16 floats/register, 4-way unrolled)
-        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::dot_avx512(a, b) };
+        if n >= MIN_DIM_AVX512 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::dot_avx512(simd, a, b);
+            }
         }
 
         // Fall back to AVX2+FMA (8 floats/register, 4-way unrolled)
-        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
-        {
-            // SAFETY: AVX2 and FMA verified via runtime detection.
-            return unsafe { arch::x86_64::dot_avx2(a, b) };
+        if n >= MIN_DIM_SIMD {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::dot_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= MIN_DIM_SIMD {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::dot_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::dot_neon(simd, a, b);
+            }
         }
     }
 
@@ -239,7 +240,6 @@ pub fn normalize_with_norm(v: &mut [f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -249,28 +249,30 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::cosine_avx512(a, b) };
+        if n >= MIN_DIM_AVX512 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::cosine_avx512(simd, a, b);
+            }
         }
 
-        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
-        {
-            // SAFETY: AVX2 and FMA verified via runtime detection.
-            return unsafe { arch::x86_64::cosine_avx2(a, b) };
+        if n >= MIN_DIM_SIMD {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::cosine_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= MIN_DIM_SIMD {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::cosine_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::cosine_neon(simd, a, b);
+            }
         }
     }
 
@@ -504,7 +506,6 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -514,27 +515,30 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::l1_avx512(a, b) };
+        if n >= MIN_DIM_AVX512 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::l1_avx512(simd, a, b);
+            }
         }
 
-        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") {
-            // SAFETY: AVX2 verified via runtime detection.
-            return unsafe { arch::x86_64::l1_avx2(a, b) };
+        if n >= MIN_DIM_SIMD {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::l1_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= MIN_DIM_SIMD {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::l1_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::l1_neon(simd, a, b);
+            }
         }
     }
 
@@ -601,7 +605,6 @@ pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -611,28 +614,30 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let n = a.len();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if n >= MIN_DIM_AVX512 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::l2_squared_avx512(a, b) };
+        if n >= MIN_DIM_AVX512 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::l2_squared_avx512(simd, a, b);
+            }
         }
 
-        if n >= MIN_DIM_SIMD && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
-        {
-            // SAFETY: AVX2 and FMA verified via runtime detection.
-            return unsafe { arch::x86_64::l2_squared_avx2(a, b) };
+        if n >= MIN_DIM_SIMD {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::l2_squared_avx2(simd, a, b);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if n >= MIN_DIM_SIMD {
-            // SAFETY: NEON is always available on aarch64.
-            return unsafe { arch::aarch64::l2_squared_neon(a, b) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::l2_squared_neon(simd, a, b);
+            }
         }
     }
 

@@ -46,7 +46,7 @@
 use crate::dense::{cosine, dot};
 
 // arch is only used on architectures with SIMD dispatch
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 use crate::arch;
 
 /// MaxSim: sum over query tokens of max dot product with any doc token.
@@ -92,7 +92,6 @@ use crate::arch;
 /// ```
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     if query_tokens.is_empty() || doc_tokens.is_empty() {
         return 0.0;
@@ -109,26 +108,29 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
         "dimension mismatch (doc)"
     );
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
         // AVX-512
-        if dim >= 64 && is_x86_feature_detected!("avx512f") {
-            // SAFETY: AVX-512F verified via runtime detection.
-            return unsafe { arch::x86_64::maxsim_avx512(query_tokens, doc_tokens) };
+        if dim >= 64 {
+            if let Some(simd) = pulp::x86::V4::try_new() {
+                return arch::x86_64::maxsim_avx512(simd, query_tokens, doc_tokens);
+            }
         }
 
         // AVX2
-        if dim >= 16 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            // SAFETY: AVX2 and FMA verified via runtime detection.
-            return unsafe { arch::x86_64::maxsim_avx2(query_tokens, doc_tokens) };
+        if dim >= 16 {
+            if let Some(simd) = pulp::x86::V3::try_new() {
+                return arch::x86_64::maxsim_avx2(simd, query_tokens, doc_tokens);
+            }
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
     {
         if dim >= 16 {
-            // SAFETY: NEON is always available on aarch64
-            return unsafe { arch::aarch64::maxsim_neon(query_tokens, doc_tokens) };
+            if let Some(simd) = pulp::aarch64::Neon::try_new() {
+                return arch::aarch64::maxsim_neon(simd, query_tokens, doc_tokens);
+            }
         }
     }
 
@@ -139,7 +141,7 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
 /// Portable MaxSim implementation using standard dot product.
 #[inline]
 #[must_use]
-fn maxsim_portable(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
+pub(crate) fn maxsim_portable(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
     query_tokens
         .iter()
         .map(|q| {

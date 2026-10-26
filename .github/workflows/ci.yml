@@ -59,6 +59,12 @@ jobs:
       - name: Test
         run: cargo test --all-features
 
+      - name: Test portable kernels
+        run: cargo test --no-default-features
+
+      - name: Clippy portable kernels
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
       - name: Run example assertions
         run: |
           cargo run --example 01_basic_ops --all-features
@@ -253,7 +259,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run property tests (extended)
-        run: cargo test property_ --all-features
+        # Some property_tests groups keep explicit 500/200-case limits;
+        # the other targets use PROPTEST_CASES below.
+        run: cargo test --all-features --test property_tests --test maxsim_props --test sparse_maxsim_props
         env:
           PROPTEST_CASES: 2000
 
@@ -266,17 +274,18 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: "1.89"
+          toolchain: "1.94"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Check MSRV
         run: |
-          # MSRV matches Cargo.toml `rust-version = "1.89"`. The 1.89 floor
-          # is set by AVX-512 intrinsics on x86_64; bumping in lockstep with
-          # Cargo.toml keeps the gate honest.
+          # The pinned Pulp backend requires Rust 1.94 for its x86 intrinsics.
+          # Keep this in sync with Cargo.toml's rust-version.
           rm -f Cargo.lock
           rustup target add aarch64-unknown-linux-gnu
           cargo check --target aarch64-unknown-linux-gnu
+          cargo check
+          cargo check --no-default-features
 
   # Dependency linting (licenses, advisories, bans, sources)
   deny:

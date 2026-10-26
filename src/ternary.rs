@@ -187,7 +187,6 @@ pub fn encode_ternary(values: &[f32], threshold: f32) -> PackedTernary {
 /// 5. Contribution = popcount(same) - popcount(diff)
 #[inline]
 #[must_use]
-#[allow(unsafe_code)]
 pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
     assert_eq!(
         a.dimension, b.dimension,
@@ -196,11 +195,12 @@ pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
     );
     assert_eq!(a.data.len(), b.data.len());
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
     {
-        if is_x86_feature_detected!("popcnt") {
-            // SAFETY: POPCNT verified via runtime detection
-            return unsafe { ternary_dot_popcnt(&a.data, &b.data) };
+        // Running the integer loop under a POPCNT-enabled token turns each
+        // `count_ones` into one `popcnt`.
+        if let Some(simd) = pulp::x86::V2::try_new() {
+            return simd.vectorize(|| ternary_dot_popcnt(&a.data, &b.data));
         }
     }
 
@@ -249,11 +249,9 @@ fn ternary_dot_portable(a: &[u64], b: &[u64]) -> i32 {
 }
 
 /// x86_64 POPCNT implementation.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "popcnt")]
+#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+#[inline(always)]
 fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
-    use std::arch::x86_64::_popcnt64;
-
     let mut same_count: i64 = 0;
     let mut diff_count: i64 = 0;
 
@@ -269,8 +267,8 @@ fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
         let same = (pos_a & pos_b) | (neg_a & neg_b);
         let diff = (pos_a & neg_b) | (neg_a & pos_b);
 
-        same_count += i64::from(_popcnt64(same as i64));
-        diff_count += i64::from(_popcnt64(diff as i64));
+        same_count += i64::from(same.count_ones());
+        diff_count += i64::from(diff.count_ones());
     }
 
     (same_count - diff_count) as i32

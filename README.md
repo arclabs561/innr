@@ -4,14 +4,7 @@
 [![Documentation](https://docs.rs/innr/badge.svg)](https://docs.rs/innr)
 [![CI](https://github.com/arclabs561/innr/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/innr/actions/workflows/ci.yml)
 
-SIMD-accelerated vector similarity primitives: dot, cosine, and
-Euclidean distance over `f32` / `u8`, plus binary, ternary, and
-scalar quantization. Targets x86 AVX2/AVX-512 and aarch64 NEON,
-with scalar fallback.
-
-SimSIMD covers more metrics, types and instruction sets through C kernels with
-Rust bindings; innr is pure Rust with no C toolchain, and adds
-quantized, batch and late-interaction kernels.
+SIMD-accelerated vector similarity primitives.
 
 ## Quickstart
 
@@ -23,7 +16,7 @@ innr = "0.6.3"
 The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
 Set `default-features = false` for dependency-free portable kernels.
 
-This development branch pins Pulp to commit
+The source checkout pins Pulp to commit
 `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, which uses `pastey`.
 This dependency configuration is not ready for crates.io publication; a
 published replacement and release validation are still required. Innr forbids
@@ -36,9 +29,12 @@ use innr::{dot, cosine, norm};
 let a = [1.0_f32, 0.0, 0.0];
 let b = [0.707, 0.707, 0.0];
 
-let d = dot(&a, &b);      // 0.707
-let c = cosine(&a, &b);   // 0.707
-let n = norm(&a);         // 1.0
+let d = dot(&a, &b);
+let c = cosine(&a, &b);
+let n = norm(&a);
+assert!((d - 0.707).abs() < 1e-6);
+assert!((c - 0.707107).abs() < 1e-6);
+assert_eq!(n, 1.0);
 ```
 
 ### Batch search
@@ -57,33 +53,15 @@ let batch = VerticalBatch::from_rows(&corpus);
 
 let query = [0.8f32, 0.6, 0.0];
 let result = batch_knn_dot(&query, &batch, 2);
-// result.indices: top-2 nearest by dot product
-// result.scores: corresponding similarity scores
+assert_eq!(result.indices, vec![2, 0]);
+assert!((result.scores[0] - 0.98).abs() < 1e-6);
 ```
 
-## Operations
+## API
 
-**Core (f32)**: `dot`, `cosine`, `norm`, `l2_distance`, `l2_distance_squared`, `l1_distance`, `angular_distance`, `normalize`, `normalize_with_norm` (normalize in place, returns the original norm). Portable fallbacks in `innr::dense` (e.g. `dot_portable`).
-
-**Core (f64)**: `innr::dense_f64::{dot_f64, cosine_f64, norm_f64, l2_distance_f64, l2_distance_squared_f64, l1_distance_f64}`: SIMD-dispatched (AVX-512/AVX2/NEON), for iterative-solver residuals and statistical reductions. SIMD and portable paths may differ in floating-point rounding.
-
-**Backend introspection**: `innr::backend::{dense_backend, slot_backend}` report which kernel family (`Avx512` / `Avx2Fma` / `Neon` / `Portable`) a given length dispatches to on this machine.
-
-**Matryoshka**: `matryoshka_dot`, `matryoshka_cosine`: similarity on a prefix of the embedding.
-
-**Binary quantization (1-bit)**: `encode_binary` to packed bits, `binary_dot`, `binary_hamming`, `binary_jaccard`. 32x memory reduction over f32.
-
-**Ternary quantization (2-bit storage)**: `ternary::encode_ternary` to {-1, 0, +1}, `ternary_dot`, `ternary_hamming`, `asymmetric_dot` (float query x ternary doc). The packed representation uses two bits per dimension, or 16x less storage than f32.
-
-**Scalar quantization (uint8)**: `scalar::QuantizationParams` (from `fit()`, `fit_quantile()`, or `from_range()`), `quantize_u8`, `asymmetric_dot_u8`. Precomputed query path via `query_context()` + `asymmetric_dot_u8_precomputed`; raw f32-by-u8 inner loop via `mixed_dot_u8_f32`. Batch search via `batch_knn_u8`. 4x compression.
-
-**Batch operations**: `batch::VerticalBatch` (PDX-style columnar layout) with `batch_dot`, `batch_l2_squared`, `batch_l2_squared_pruning`, `batch_cosine`, `batch_norms`, reusable-output `_into` variants for repeated scans, `batch_knn`, `batch_knn_cosine`, `batch_knn_dot`, `batch_knn_filtered` (predicate pushdown), `batch_knn_reordered` (variance-ordered pruning), `batch_knn_adaptive` (approximate early-exit), `batch_dimension_variance`.
-
-**Sparse vectors**: `sparse_dot`.
-
-**Late interaction**: `maxsim`, `maxsim_cosine` (ColBERT-style), `sparse_maxsim` (sparse late interaction).
-
-**Integer-slot Hamming / MinHash**: `slot_hamming_u16`, `slot_hamming_u32`, and `slot_hamming_u64` (SIMD-dispatched differing-slot count; u16 suits b-bit MinHash at b=16, the u64 path suits probminhash-style 64-bit sketches), `slot_hamming` (generic widths), `minhash_jaccard` (collision-probability estimate), `jaccard_distance` (distance form), `slot_compare_counts` (the `(eq, lt, gt)` per-position triple in `SlotCounts`, for SetSketch / UltraLogLog joint estimators that need the `lt`/`gt` counts, not just `eq`).
+The [API reference](https://docs.rs/innr) covers dense and sparse similarity,
+quantization, batch search, and late interaction. SIMD and portable paths may
+differ in floating-point rounding.
 
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 

@@ -45,8 +45,11 @@ Process N vectors against one query:
 ```rust
 use innr::batch::{batch_dot, VerticalBatch};
 
+let documents = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+let query = [0.8, 0.6];
 let batch = VerticalBatch::from_rows(&documents);
 let scores = batch_dot(&query, &batch);
+assert_eq!(scores, vec![0.8, 0.6]);
 ```
 
 **Why batch?** Amortizes function call overhead; enables better cache usage.
@@ -59,7 +62,7 @@ let scores = batch_dot(&query, &batch);
 
 innr detects CPU features at runtime:
 
-```
+```text
 AVX-512  → 16 floats/instruction  (server CPUs)
 AVX2+FMA → 8 floats/instruction   (most x86_64 since 2013)
 NEON     → 4 floats/instruction   (all ARM64)
@@ -89,20 +92,21 @@ This gives **16x memory compression** (2 bits vs 32 bits per dimension).
 ```rust
 use innr::ternary::{encode_ternary, ternary_dot};
 
-// Encode (threshold ~0.3 works well for normalized embeddings)
-let packed = encode_ternary(&embedding, 0.3);
-
-// Compare (uses popcount - very fast)
+let a = [0.8, -0.5, 0.1];
+let b = [0.7, 0.4, 0.2];
+let packed_a = encode_ternary(&a, 0.3);
+let packed_b = encode_ternary(&b, 0.3);
 let similarity = ternary_dot(&packed_a, &packed_b);
+assert_eq!(similarity, 0);
 ```
 
 ### Memory savings
 
 | Dimension | f32 | Ternary | Compression |
 |-----------|-----|---------|-------------|
-| 384 | 1.5 KB | 96 B | 16x |
-| 768 | 3 KB | 192 B | 16x |
-| 1536 | 6 KB | 384 B | 16x |
+| 384 | 1.5 KiB | 96 B | 16x |
+| 768 | 3 KiB | 192 B | 16x |
+| 1536 | 6 KiB | 384 B | 16x |
 
 ### When to use
 
@@ -115,12 +119,16 @@ let similarity = ternary_dot(&packed_a, &packed_b);
 Keep query at full precision, quantize only database:
 
 ```rust
-use innr::ternary::asymmetric_dot;
+use innr::ternary::{asymmetric_dot, encode_ternary};
 
-let score = asymmetric_dot(&query_f32, &doc_ternary);
+let query = [0.8, -0.5, 0.1];
+let document = encode_ternary(&[0.7, 0.4, 0.2], 0.3);
+let score = asymmetric_dot(&query, &document);
+assert!((score - 0.3).abs() < 1e-6);
 ```
 
-Better accuracy than symmetric (ternary × ternary).
+This preserves the query values. Measure retrieval quality on your data to
+choose between symmetric and asymmetric scoring.
 
 **Example**: `cargo run --example ternary_demo --release`
 
@@ -132,14 +140,17 @@ Better accuracy than symmetric (ternary × ternary).
 
 **Problem**: SIMD has setup overhead. For dim < 16, scalar may be faster.
 
-**Solution**: Profile. innr automatically falls back when SIMD isn't beneficial.
+**Solution**: Profile. Dense f32 operations use portable code below 16 dimensions;
+other kernels have their own dispatch thresholds.
 
 ### 2. Wrong threshold for ternary
 
 **Problem**: Threshold too high → mostly zeros → poor discrimination.
 Threshold too low → mostly ±1 → loses information.
 
-**Solution**: For normalized embeddings, threshold ≈ 0.2-0.4 works well. Use `compute_threshold()` for adaptive selection.
+**Solution**: Choose a threshold using representative vectors and measure
+retrieval quality. A fixed threshold can erase most coordinates in a normalized
+embedding, especially at higher dimensions.
 
 ### 3. Expecting ternary to preserve exact similarities
 

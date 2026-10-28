@@ -1,6 +1,6 @@
 # Examples
 
-SIMD-accelerated vector similarity primitives for ML workloads.
+Examples of vector similarity and quantization.
 
 ## Quick Start
 
@@ -72,12 +72,6 @@ Batch kNN over a corpus?
 
 ## Distance Cost
 
-In HNSW search: ~20 hops x 32 neighbors = 640 distance calls per query.
-Distance-kernel improvements matter most when distance calls dominate query
-time.
-
-| Operation | Standard | Accelerated | Typical Speedup |
-|-----------|----------|-------------|-----------------|
-| dot | portable loop | AVX2/NEON dispatch | 4-8x |
-| cosine | portable loop | AVX2/NEON dispatch | hardware-dependent |
-| binary hamming | N/A | XOR + popcount | orders of magnitude vs f32 |
+Distance calculations can dominate nearest-neighbor search. Measure the
+kernels on your target CPU with `cargo bench`; speedups depend on vector
+length, memory access, and the available instruction set.

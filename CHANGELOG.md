@@ -25,6 +25,15 @@
   `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports with
   safe implementations, including the existing length-mismatch panic contracts.
 
+### Fixed
+
+- Corrected the accuracy documentation of `fast_rsqrt` (maximum relative error
+  about 1.75e-3, not ~23 bits), `fast_rsqrt_precise` (about 4.7e-6; it does
+  not match IEEE `1.0 / x.sqrt()`) and `fast_cosine` (up to about 3.5e-3
+  relative, including for normalized vectors). `fast_cosine_dispatch` now
+  documents that inputs shorter than 16 elements use `fast_cosine`. Results
+  are unchanged.
+
 ## 0.6.3
 
 - `scalar::mixed_dot_u8_f32`: public SIMD-dispatched f32-by-u8 inner product

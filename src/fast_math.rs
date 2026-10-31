@@ -31,7 +31,9 @@ use crate::MIN_DIM_SIMD;
 
 /// Fast scalar inverse square root using the classic Quake III bit-hack.
 ///
-/// One Newton-Raphson iteration for ~23 bits of accuracy.
+/// One Newton-Raphson iteration from the 0x5f375a86 seed: maximum relative
+/// error about 1.75e-3 (about 9 bits), as derived by Lomont (2003), "Fast
+/// Inverse Square Root", and confirmed exhaustively over one period `[1, 4)`.
 ///
 /// # Safety Note
 ///
@@ -59,7 +61,8 @@ pub fn fast_rsqrt(x: f32) -> f32 {
 
 /// Fast scalar inverse square root with two NR iterations.
 ///
-/// ~46 bits of accuracy (overkill for f32, but matches IEEE sqrt).
+/// Maximum relative error about 4.7e-6 (about 17 bits). It is not correctly
+/// rounded, so results can differ from `1.0 / x.sqrt()` in the low bits.
 #[inline]
 #[must_use]
 pub fn fast_rsqrt_precise(x: f32) -> f32 {
@@ -79,8 +82,10 @@ pub fn fast_rsqrt_precise(x: f32) -> f32 {
 ///
 /// # Accuracy
 ///
-/// Relative error is typically < 1e-6 for normalized vectors.
-/// For unnormalized vectors with extreme magnitude differences, error may be higher.
+/// Each of the two [`fast_rsqrt`] factors has up to about 1.75e-3 relative
+/// error, so the result can be off by about 3.5e-3 relative, for normalized
+/// vectors too: `fast_cosine(u, u)` for the unit vector `[1, 0, 0]` is 0.99662.
+/// Use [`crate::cosine`] when that matters.
 ///
 /// # Example
 ///
@@ -438,6 +443,10 @@ pub(crate) mod aarch64 {
 ///
 /// Selects AVX-512, AVX2+FMA, NEON, or portable based on runtime detection.
 ///
+/// The SIMD paths refine a hardware rsqrt estimate to near full f32 precision.
+/// Inputs shorter than 16 elements, or builds without SIMD, use the portable
+/// [`fast_cosine`] and carry its error of up to about 3.5e-3 relative.
+///
 /// # Examples
 ///
 /// ```text
@@ -558,6 +567,29 @@ mod tests {
                 rel_error
             );
         }
+    }
+
+    #[test]
+    fn test_fast_rsqrt_documented_error_bounds() {
+        // The bit-hack error repeats every factor of 4 in x, so a dense sweep
+        // of [1, 4) plus a few far scales covers the documented maxima
+        // (1.75e-3 after one NR step, 4.7e-6 after two).
+        let mut worst = (0f64, 0f64);
+        for scale in [1e-30f32, 1e-3, 1.0, 1e3, 1e30] {
+            for i in 0..30_000 {
+                let x = scale * (1.0 + 3.0 * i as f32 / 30_000.0);
+                let exact = 1.0 / f64::from(x).sqrt();
+                let rel = |r: f32| (f64::from(r) - exact).abs() / exact;
+                worst.0 = worst.0.max(rel(fast_rsqrt(x)));
+                worst.1 = worst.1.max(rel(fast_rsqrt_precise(x)));
+            }
+        }
+        assert!(worst.0 > 1.7e-3 && worst.0 < 1.76e-3, "{worst:?}");
+        assert!(worst.1 > 4.0e-6 && worst.1 < 4.8e-6, "{worst:?}");
+
+        let unit = [1.0f32, 0.0, 0.0];
+        let c = fast_cosine(&unit, &unit);
+        assert!((c - 1.0).abs() < 3.6e-3, "fast_cosine(u, u) = {c}");
     }
 
     #[test]

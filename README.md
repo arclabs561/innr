@@ -13,15 +13,16 @@ SIMD-accelerated vector similarity primitives.
 innr = "0.6.3"
 ```
 
-The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
-Set `default-features = false` for dependency-free portable kernels.
+The published 0.6.3 dispatches with its own `std::arch` kernels, has no
+`simd` feature, and declares Rust 1.89. The rest of this README
+describes the unreleased source checkout, which differs as follows.
 
-The source checkout pins Pulp to commit
-`601de0c071ba32df3fd7ff33fc4218c9bd712aba`, which uses `pastey`.
-This dependency configuration is not ready for crates.io publication; a
-published replacement and release validation are still required. Innr forbids
-locally authored unsafe Rust; Pulp uses unsafe code internally behind its safe
-API. This does not make the dependency tree unsafe-free.
+The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
+Set `default-features = false` for dependency-free portable kernels. The
+checkout pins Pulp to git commit `601de0c071ba32df3fd7ff33fc4218c9bd712aba`
+(which uses `pastey`), so it cannot be published to crates.io as is. innr
+forbids unsafe code in its own source; Pulp uses unsafe code internally
+behind its safe API.
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -92,10 +93,11 @@ Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantiz
 
 ![Benchmark throughput](docs/bench_throughput.png)
 
-*Apple Silicon (NEON). Run `cargo bench` to reproduce on your hardware.*
+*Cache-resident, single-core criterion runs of innr 0.1.5 on Apple Silicon
+(NEON), transcribed into `scripts/plot_benchmarks.py`. They predate the Pulp
+backend; run `cargo bench` for current numbers on your hardware.*
 
-The plotted measurements are cache-resident, single-core runs on Apple Silicon
-(NEON). Results depend on the CPU, compiler, vector length, and memory behavior.
+Results depend on the CPU, compiler, vector length, and memory behavior.
 AVX-512 paths are executed and differential-tested in CI under Intel SDE.
 
 For maximum performance, build with native CPU features:

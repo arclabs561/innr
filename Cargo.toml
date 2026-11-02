@@ -13,7 +13,8 @@ categories = ["algorithms", "science"]
 publish = true
 include = [
     "/src/**/*.rs",
-    "/benches/**/*.rs",
+    "/benches/*.rs",
+    "/benches/support/**/*.rs",
     "/tests/**/*.rs",
     "/examples/**/*.rs",
     "/Cargo.toml",
@@ -26,7 +27,6 @@ include = [
 [package.metadata.docs.rs]
 # Build with every library feature so sparse_ext, the anndists impls and the
 # SIMD backend are visible on docs.rs (they are README-advertised).
-# bench-numkong is benchmark-only and is left out.
 features = ["simd", "sparse", "anndists"]
 
 [features]
@@ -40,9 +40,6 @@ sparse = []
 # making them usable directly as hnsw_rs distances (hnsw_rs binds to
 # anndists's trait). Off by default to keep interop dependencies opt-in.
 anndists = ["dep:anndists"]
-# Bench-only: adds NumKong (C kernels, built with `cc`) as a reference column
-# in the consumer benches. Not part of the library API.
-bench-numkong = ["dep:numkong"]
 
 [dependencies]
 # With default features off, core operations need only std.
@@ -51,8 +48,6 @@ anndists = { version = "0.1.5", optional = true }
 # Safe SIMD with runtime dispatch. innr uses only its safe portable vector
 # types and `Simd::vectorize`, so no `unsafe` expands into this crate.
 fearless_simd = { version = "1.2", optional = true }
-# Bench-only reference implementation; see the `bench-numkong` feature.
-numkong = { version = "=7.8.5", optional = true }
 
 [dev-dependencies]
 # Tests run the SIMD kernels on fearless_simd's scalar `Fallback` level too,

@@ -49,8 +49,6 @@ jobs:
       - name: Clippy (aarch64 target)
         # Cross-target lint: catches NEON-gated dead code and unused imports
         # that x86 clippy never compiles.
-        # Library features only: bench-numkong builds C code and would need an
-        # aarch64 cross C compiler.
         run: |
           rustup target add aarch64-unknown-linux-gnu
           cargo clippy --all-targets --features simd,sparse,anndists --target aarch64-unknown-linux-gnu -- -D warnings
@@ -227,7 +225,6 @@ jobs:
           timeout_minutes: 15
           max_attempts: 3
           retry_wait_seconds: 30
-          # Library features only; bench-numkong needs a target C compiler.
           command: cargo check --target ${{ matrix.target }} --features simd,sparse,anndists
 
   # QEMU-based ARM testing (actual execution via emulation)

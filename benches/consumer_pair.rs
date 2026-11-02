@@ -4,8 +4,9 @@
 //! Each group compares innr (this build's path: `innr_simd` with the default
 //! `simd` feature, `innr_portable` with `--no-default-features`) against the
 //! consumer's own no-innr fallback, copied verbatim with its source location.
-//! Fallback and NumKong variants run only in the `simd` build so the two-build
-//! suite measures them once. `benches/report.sh` runs both builds.
+//! Fallback variants run only in the `simd` build so the two-build suite
+//! measures them once; the NumKong reference column lives in the separate
+//! `benches/numkong` crate. `benches/report.sh` runs both builds.
 //!
 //! Sources are the consumers' published repositories at these commits:
 //! vicinity 798f4d0, clump f38dc53, rankops a979f3c, qntz 23aba39,
@@ -229,10 +230,6 @@ fn pair_f32(c: &mut Criterion) {
             run(&mut g, "local_rankops", d, || {
                 rankops::dot(black_box(&a), black_box(&b))
             });
-            #[cfg(feature = "bench-numkong")]
-            run(&mut g, "numkong", d, || {
-                <f32 as numkong::Dot>::dot(black_box(&a), black_box(&b))
-            });
         }
     }
     g.finish();
@@ -257,10 +254,6 @@ fn pair_f32(c: &mut Criterion) {
             run(&mut g, "local_rankops", d, || {
                 rankops::cosine(black_box(&a), black_box(&b))
             });
-            #[cfg(feature = "bench-numkong")]
-            run(&mut g, "numkong", d, || {
-                <f32 as numkong::Angular>::cosine(black_box(&a), black_box(&b))
-            });
         }
     }
     g.finish();
@@ -277,10 +270,6 @@ fn pair_f32(c: &mut Criterion) {
             });
             run(&mut g, "local_clump", d, || {
                 clump_l2_squared(black_box(&a), black_box(&b))
-            });
-            #[cfg(feature = "bench-numkong")]
-            run(&mut g, "numkong", d, || {
-                <f32 as numkong::Euclidean>::sqeuclidean(black_box(&a), black_box(&b))
             });
         }
     }
@@ -317,10 +306,6 @@ fn pair_f64(c: &mut Criterion) {
             run(&mut g, "local_statskit", n, || {
                 statskit_l2_squared(black_box(&a), black_box(&b))
             });
-            #[cfg(feature = "bench-numkong")]
-            run(&mut g, "numkong", n, || {
-                <f64 as numkong::Euclidean>::sqeuclidean(black_box(&a), black_box(&b))
-            });
         }
     }
     g.finish();
@@ -342,14 +327,6 @@ fn hamming(c: &mut Criterion) {
             run(&mut g, "local_sketchir", n, || {
                 sketchir_hamming(black_box(&a), black_box(&b))
             });
-            #[cfg(feature = "bench-numkong")]
-            {
-                let a1: Vec<numkong::u1x8> = a.iter().map(|&x| numkong::u1x8(x)).collect();
-                let b1: Vec<numkong::u1x8> = b.iter().map(|&x| numkong::u1x8(x)).collect();
-                run(&mut g, "numkong", n, || {
-                    <numkong::u1x8 as numkong::Hamming>::hamming(black_box(&a1), black_box(&b1))
-                });
-            }
         }
     }
     g.finish();

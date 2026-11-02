@@ -4,8 +4,9 @@
 #   benches/report.sh OUT.md [--numkong] [-- CRITERION_FILTER]
 #
 # Build 1: --no-default-features (innr_portable).
-# Build 2: default features (innr_simd, plus consumer fallbacks and, with
-#          --numkong, the NumKong reference column).
+# Build 2: --features simd (innr_simd, plus consumer fallbacks).
+# --numkong: also runs benches/numkong (a separate unpublished crate) into the
+#            same Criterion directory, adding the NumKong reference column.
 # Env: INNR_BENCH_WARMUP_MS / INNR_BENCH_MEASURE_MS (see benches/support),
 #      CARGO_TARGET_DIR (respected). Needs cargo and python3.
 set -euo pipefail
@@ -19,11 +20,11 @@ fi
 OUT="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$1")"
 shift
 
-FEATURES=()
+NUMKONG=0
 FILTER=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --numkong) FEATURES=(--features bench-numkong); shift ;;
+    --numkong) NUMKONG=1; shift ;;
     --) shift; FILTER=("$@"); break ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -42,8 +43,14 @@ load_before="$(load)"
 start=$(date +%s)
 echo "== portable build (--no-default-features)" >&2
 cargo bench --no-default-features "${BENCHES[@]}" -- ${FILTER[@]+"${FILTER[@]}"} >&2
-echo "== simd build (default features ${FEATURES[*]-})" >&2
-cargo bench ${FEATURES[@]+"${FEATURES[@]}"} "${BENCHES[@]}" -- ${FILTER[@]+"${FILTER[@]}"} >&2
+echo "== simd build (--features simd)" >&2
+cargo bench --features simd "${BENCHES[@]}" -- ${FILTER[@]+"${FILTER[@]}"} >&2
+NK_NOTE=""
+if [[ $NUMKONG == 1 ]]; then
+  NK_NOTE=", NumKong enabled"
+  echo "== numkong reference (benches/numkong)" >&2
+  cargo bench --manifest-path "$ROOT/benches/numkong/Cargo.toml" --target-dir "$TARGET" -- ${FILTER[@]+"${FILTER[@]}"} >&2
+fi
 elapsed=$(( $(date +%s) - start ))
 load_after="$(load)"
 
@@ -59,6 +66,6 @@ INNR_REPORT_RUSTC="$(rustc -V)" \
 INNR_REPORT_REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
 INNR_REPORT_ELAPSED="$elapsed" \
 INNR_REPORT_LOAD="$load_before / $load_after ($(getconf _NPROCESSORS_ONLN) CPUs)" \
-INNR_REPORT_SETTINGS="warm-up ${INNR_BENCH_WARMUP_MS:-300} ms, measurement ${INNR_BENCH_MEASURE_MS:-1000} ms per bench${FEATURES[0]:+, NumKong enabled}" \
+INNR_REPORT_SETTINGS="warm-up ${INNR_BENCH_WARMUP_MS:-300} ms, measurement ${INNR_BENCH_MEASURE_MS:-1000} ms per bench${NK_NOTE}" \
   python3 "$ROOT/benches/report.py" "$CRITERION_HOME" > "$OUT"
 echo "wrote $OUT (${elapsed}s of benchmarking; raw data in $CRITERION_HOME)" >&2

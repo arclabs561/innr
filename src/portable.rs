@@ -187,24 +187,13 @@ pub(crate) fn hamming(a: &[u8], b: &[u8]) -> u32 {
     (acc.iter().sum::<u64>() + tail) as u32
 }
 
-/// Number of positions where `a[i] != b[i]`, in eight independent lanes.
+/// Number of positions where `a[i] != b[i]`.
 #[inline(always)]
 pub(crate) fn slot_ne_u64(a: &[u64], b: &[u64]) -> u64 {
-    const L: usize = 8;
-    let n = a.len().min(b.len());
-    let (ca, ra) = a[..n].as_chunks::<L>();
-    let (cb, rb) = b[..n].as_chunks::<L>();
-    let mut acc = [0u64; L];
-    for (x, y) in ca.iter().zip(cb) {
-        for i in 0..L {
-            acc[i] += u64::from(x[i] != y[i]);
-        }
-    }
-    let mut sum: u64 = acc.iter().sum();
-    for (x, y) in ra.iter().zip(rb) {
-        sum += u64::from(x != y);
-    }
-    sum
+    // A plain filter-count loop: LLVM vectorizes it (SSE2 emulates the 64-bit
+    // compare with pcmpeqd + pshufd). An eight-lane accumulator array here
+    // compiled to eight scalar compare chains on x86_64 and ran 1.5x slower.
+    a.iter().zip(b).filter(|(x, y)| x != y).count() as u64
 }
 
 #[cfg(test)]

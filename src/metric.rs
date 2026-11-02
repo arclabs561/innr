@@ -176,12 +176,10 @@ metric_type!(
 use crate::arch::kernels;
 use crate::{dense, dense_f64, quant};
 
-/// Minimum length for the f32 SIMD kernels.
-const MIN_F32: usize = 16;
-/// Minimum length for the f64 SIMD kernels.
-const MIN_F64: usize = 8;
-/// Minimum length for the byte SIMD kernels.
-const MIN_U8: usize = 32;
+use crate::backend::THRESHOLDS;
+
+const MIN_F32: usize = THRESHOLDS.dense_f32;
+const MIN_F64: usize = THRESHOLDS.dense_f64;
 
 macro_rules! float_metric {
     ($metric:ty, $dir:expr, $t:ty, $min:expr, $portable:path, $simd:ident) => {
@@ -292,7 +290,7 @@ impl Metric<f64> for Cosine {
 
 impl Kernel<u8> for Dot {
     type Output = u64;
-    const MIN_SIMD_LEN: usize = MIN_U8;
+    const MIN_SIMD_LEN: usize = THRESHOLDS.dot_u8;
     #[inline]
     fn portable(a: &[u8], b: &[u8]) -> u64 {
         quant::dot_u8_wide_portable(a, b)
@@ -314,7 +312,7 @@ impl Metric<u8> for Dot {
 
 impl Kernel<u8> for Hamming {
     type Output = u32;
-    const MIN_SIMD_LEN: usize = MIN_U8;
+    const MIN_SIMD_LEN: usize = THRESHOLDS.hamming_u8;
     #[inline]
     fn portable(a: &[u8], b: &[u8]) -> u32 {
         quant::hamming_portable(a, b)

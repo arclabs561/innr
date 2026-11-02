@@ -5,9 +5,9 @@
 //! that level's target features. Vector width comes from the level's native
 //! types (`S::f32s` is 16 lanes on AVX-512, 8 on AVX2, 4 on NEON and WASM).
 //!
-//! Floating-point reductions keep four independent vector accumulators, fold
-//! one more vector at a time for the remainder, and finish the last
-//! `LEN - 1` elements in scalar code. `mul_add` is fused on every dispatched
+//! Floating-point reductions keep eight independent vector accumulators,
+//! spread leftover whole vectors over them, and finish the last `LEN - 1`
+//! elements in scalar code. `mul_add` is fused on every dispatched
 //! level (AVX2+FMA, AVX-512, NEON); the order of summation differs from the
 //! portable kernels, so results agree to rounding, not bit for bit.
 
@@ -15,7 +15,14 @@ use fearless_simd::{
     Simd, SimdBase, SimdCvtFloat, SimdFloat, SimdInt, SimdIntWiden, SimdMask, SimdWiden,
 };
 
-/// Fold `step` over equal-length float slices with four vector accumulators.
+/// Independent vector accumulators in [`fold_float`]. Eight covers FMA
+/// latency times throughput on the dispatched levels (four cycles by two FMA
+/// ports on x86, by four pipes on Apple NEON cores, which still need half of
+/// them); four measured slower than the portable kernels on NEON at 384+.
+const ACC: usize = 8;
+
+/// Fold `step` over equal-length float slices with [`ACC`] vector
+/// accumulators.
 ///
 /// `step(acc, x, y)` updates one accumulator from one pair of vectors;
 /// `tail(acc, x, y)` does the same for one pair of scalars.
@@ -35,41 +42,41 @@ where
     let n = a.len().min(b.len());
     let (a, b) = (&a[..n], &b[..n]);
     let l = V::LEN;
-    let z = V::splat(simd, zero);
-    let (mut s0, mut s1, mut s2, mut s3) = (z, z, z, z);
+    let mut s = [V::splat(simd, zero); ACC];
 
-    let mut ca = a.chunks_exact(4 * l);
-    let mut cb = b.chunks_exact(4 * l);
+    let mut ca = a.chunks_exact(ACC * l);
+    let mut cb = b.chunks_exact(ACC * l);
     for (x, y) in (&mut ca).zip(&mut cb) {
-        s0 = step(
-            s0,
-            V::from_slice(simd, &x[..l]),
-            V::from_slice(simd, &y[..l]),
-        );
-        s1 = step(
-            s1,
-            V::from_slice(simd, &x[l..2 * l]),
-            V::from_slice(simd, &y[l..2 * l]),
-        );
-        s2 = step(
-            s2,
-            V::from_slice(simd, &x[2 * l..3 * l]),
-            V::from_slice(simd, &y[2 * l..3 * l]),
-        );
-        s3 = step(
-            s3,
-            V::from_slice(simd, &x[3 * l..]),
-            V::from_slice(simd, &y[3 * l..]),
-        );
+        for (k, acc) in s.iter_mut().enumerate() {
+            let r = k * l..(k + 1) * l;
+            *acc = step(
+                *acc,
+                V::from_slice(simd, &x[r.clone()]),
+                V::from_slice(simd, &y[r]),
+            );
+        }
     }
 
+    // Spread the leftover whole vectors (fewer than ACC) over the
+    // accumulators. The loop has a constant trip count so it unrolls with
+    // constant indices; a data-dependent index would spill `s` to the stack.
     let mut ra = ca.remainder().chunks_exact(l);
     let mut rb = cb.remainder().chunks_exact(l);
-    for (x, y) in (&mut ra).zip(&mut rb) {
-        s0 = step(s0, V::from_slice(simd, x), V::from_slice(simd, y));
+    for acc in s.iter_mut().take(ACC - 1) {
+        let (Some(x), Some(y)) = (ra.next(), rb.next()) else {
+            break;
+        };
+        *acc = step(*acc, V::from_slice(simd, x), V::from_slice(simd, y));
     }
 
-    let mut sum = ((s0 + s1) + (s2 + s3)).reduce_sum();
+    let mut w = ACC;
+    while w > 1 {
+        w /= 2;
+        for k in 0..w {
+            s[k] += s[k + w];
+        }
+    }
+    let mut sum = s[0].reduce_sum();
     for (&x, &y) in ra.remainder().iter().zip(rb.remainder()) {
         sum = tail(sum, x, y);
     }
@@ -361,26 +368,6 @@ pub(crate) fn slot_ne_u16<S: Simd>(simd: S, a: &[u16], b: &[u16]) -> u32 {
     sum
 }
 
-/// Number of positions where `a[i] != b[i]` over `u64` slots.
-#[inline(always)]
-pub(crate) fn slot_ne_u64<S: Simd>(simd: S, a: &[u64], b: &[u64]) -> u64 {
-    let n = a.len().min(b.len());
-    let (a, b) = (&a[..n], &b[..n]);
-    let l = S::u64s::LEN;
-    let mut acc = S::i64s::splat(simd, 0);
-    let mut ca = a.chunks_exact(l);
-    let mut cb = b.chunks_exact(l);
-    for (x, y) in (&mut ca).zip(&mut cb) {
-        let ne = S::u64s::from_slice(simd, x).simd_ne(S::u64s::from_slice(simd, y));
-        acc -= ne.to_vector();
-    }
-    let mut sum = acc.reduce_sum() as u64;
-    for (x, y) in ca.remainder().iter().zip(cb.remainder()) {
-        sum += u64::from(x != y);
-    }
-    sum
-}
-
 /// ColBERT MaxSim: `Σ_q max_d dot(q, d)`, every pair on one level token.
 #[inline(always)]
 pub(crate) fn maxsim<S: Simd>(simd: S, query: &[&[f32]], doc: &[&[f32]]) -> f32 {
@@ -513,13 +500,6 @@ mod tests {
                 s.vectorize(|| slot_ne_u16(s, &ha, &hb)) as usize,
                 r,
                 "slot16 n={n}"
-            );
-            let wa: Vec<u64> = sa.iter().map(|&x| u64::from(x)).collect();
-            let wb: Vec<u64> = sb.iter().map(|&x| u64::from(x)).collect();
-            assert_eq!(
-                s.vectorize(|| slot_ne_u64(s, &wa, &wb)) as usize,
-                r,
-                "slot64 n={n}"
             );
         }
     }

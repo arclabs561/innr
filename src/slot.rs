@@ -48,9 +48,9 @@
 //! any other slot type the generic [`slot_hamming`] relies on LLVM
 //! auto-vectorization of the integer-compare loop.
 
-/// Minimum slot count for the SIMD paths to be worthwhile.
+/// Minimum slot count for the `u16` and `u32` SIMD paths.
 #[cfg(feature = "simd")]
-pub(crate) const MIN_SLOTS_SIMD: usize = 8;
+const MIN_SLOTS_SIMD: usize = crate::backend::THRESHOLDS.slot_u16_u32;
 
 /// Integer-slot Hamming distance over `u32` slots: the number of positions
 /// where `a[i] != b[i]`.
@@ -149,7 +149,7 @@ pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
 /// Count differing `u64` slots: the SIMD-accelerated path for 64-bit MinHash
 /// sketches (e.g. probminhash `SuperMinHash2` output).
 ///
-/// AVX-512 / AVX2 on x86_64, NEON on aarch64, portable elsewhere. Panics on a
+/// Always the portable kernel (no SIMD path measured faster). Panics on a
 /// length mismatch (like [`slot_hamming_u32`]); for the truncating contract or
 /// other widths use the generic [`slot_hamming`].
 ///
@@ -170,15 +170,10 @@ pub fn slot_hamming_u64(a: &[u64], b: &[u64]) -> u64 {
         a.len(),
         b.len()
     );
-    #[cfg(feature = "simd")]
-    if a.len() >= MIN_SLOTS_SIMD {
-        return crate::arch::simd_dispatch!(
-            crate::arch::isa(),
-            s => crate::arch::kernels::slot_ne_u64(s, a, b),
-            _ => a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64,
-        );
-    }
-    a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
+    // No SIMD path: on NEON a vector holds two slots and the loop is bound by
+    // loads, so a fearless_simd kernel measured no faster than this portable
+    // one at 4 to 1024 slots. Re-add a dispatched kernel if x86 shows a win.
+    crate::portable::slot_ne_u64(a, b)
 }
 
 /// Generic integer-slot Hamming distance: the number of positions where
@@ -350,7 +345,7 @@ mod tests {
     use super::*;
 
     fn slot_hamming_u64_ref(a: &[u64], b: &[u64]) -> u64 {
-        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
+        a.iter().zip(b).filter(|(x, y)| x != y).count() as u64
     }
 
     #[test]

@@ -27,6 +27,13 @@
   6e-6 relative on the test fixtures); integer results are unchanged.
 - `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
   SIMD-sized inputs instead of a refined hardware rsqrt estimate.
+- Byte Hamming switches to SIMD at 128 bytes (was 32 on NEON/AVX2 and 64 on
+  AVX-512); below that the portable kernel, now on 64-bit words, measured as
+  fast. `slot_hamming_u64` always runs the portable kernel: a SIMD kernel
+  measured no faster on NEON at 4 to 1024 slots.
+- Portable dense kernels take a four-lane path below 16 (`f32`) or 8 (`f64`)
+  elements, measured faster than the wide lane array and than a sequential
+  loop for 3 to 12 dimensions.
 - MSRV is Rust 1.89, the minimum for `fearless_simd` 1.2.
 - The extended property CI job now selects its named integration targets
   instead of an empty name filter; explicit test-local case limits remain in
@@ -34,7 +41,10 @@
 
 ### Added
 
-- `innr::capabilities()` reports the SIMD level in use;
+- `innr::capabilities()` returns `backend::Capabilities`: the SIMD level in
+  use and `backend::Thresholds`, the input length at which each kernel family
+  switches from the portable to the SIMD kernel. Its `Display` prints both on
+  one line for benchmark output and bug reports.
   `backend::Backend::WasmSimd128` names the WASM level.
 - `innr::metric`: metrics as zero-sized types (`Dot`, `Cosine`, `L2Sq`, `L1`,
   `Hamming`) implementing a sealed `Metric<T>` trait with a `DIRECTION`

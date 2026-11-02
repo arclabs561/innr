@@ -13,9 +13,9 @@
 //! reference.
 
 /// Accumulator lanes for `f32` reductions.
-const F32_LANES: usize = 16;
+pub(crate) const F32_LANES: usize = 16;
 /// Accumulator lanes for `f64` reductions (the same register footprint).
-const F64_LANES: usize = 8;
+pub(crate) const F64_LANES: usize = 8;
 
 macro_rules! tree_sum {
     ($name:ident, $t:ty) => {
@@ -42,6 +42,24 @@ macro_rules! fold_pairs {
         #[inline(always)]
         pub(crate) fn $name(a: &[$t], b: &[$t], term: impl Fn($t, $t) -> $t) -> $t {
             let n = a.len().min(b.len());
+            if n < $lanes {
+                // Small dimensions (2-d points, short sketches): four lanes
+                // and a short tail, measured faster than the wide lane array
+                // and than a sequential loop below one wide block.
+                let (ca, ra) = a[..n].as_chunks::<4>();
+                let (cb, rb) = b[..n].as_chunks::<4>();
+                let mut acc = [0.0; 4];
+                for (x, y) in ca.iter().zip(cb) {
+                    for i in 0..4 {
+                        acc[i] += term(x[i], y[i]);
+                    }
+                }
+                let mut tail = 0.0;
+                for (&x, &y) in ra.iter().zip(rb) {
+                    tail += term(x, y);
+                }
+                return (acc[0] + acc[2]) + (acc[1] + acc[3]) + tail;
+            }
             let (ca, ra) = a[..n].as_chunks::<{ $lanes }>();
             let (cb, rb) = b[..n].as_chunks::<{ $lanes }>();
             let mut acc = [0.0; $lanes];
@@ -136,21 +154,55 @@ pub(crate) fn dot_u8_wide(a: &[u8], b: &[u8]) -> u64 {
 }
 
 /// Number of differing bits between byte-packed bit vectors.
+///
+/// XORs 64-bit words, four independent popcount accumulators per 32-byte
+/// block; `count_ones` on `u64` lowers to one `popcnt` (x86 with POPCNT) or
+/// `cnt` plus a pairwise add chain (NEON).
 #[inline(always)]
 pub(crate) fn hamming(a: &[u8], b: &[u8]) -> u32 {
-    const L: usize = 32;
+    const W: usize = 4;
+    let n = a.len().min(b.len());
+    let (ca, ra) = a[..n].as_chunks::<{ 8 * W }>();
+    let (cb, rb) = b[..n].as_chunks::<{ 8 * W }>();
+    let mut acc = [0u64; W];
+    for (x, y) in ca.iter().zip(cb) {
+        let (xw, _) = x.as_chunks::<8>();
+        let (yw, _) = y.as_chunks::<8>();
+        for k in 0..W {
+            let d = u64::from_le_bytes(xw[k]) ^ u64::from_le_bytes(yw[k]);
+            acc[k] += u64::from(d.count_ones());
+        }
+    }
+    let (xw, xr) = ra.as_chunks::<8>();
+    let (yw, yr) = rb.as_chunks::<8>();
+    let mut tail: u64 = 0;
+    for (x, y) in xw.iter().zip(yw) {
+        tail += u64::from((u64::from_le_bytes(*x) ^ u64::from_le_bytes(*y)).count_ones());
+    }
+    for (&x, &y) in xr.iter().zip(yr) {
+        tail += u64::from((x ^ y).count_ones());
+    }
+    // At most 8 bits per input byte, so the total fits u32 for any input the
+    // u32-returning API accepts without overflowing.
+    (acc.iter().sum::<u64>() + tail) as u32
+}
+
+/// Number of positions where `a[i] != b[i]`, in eight independent lanes.
+#[inline(always)]
+pub(crate) fn slot_ne_u64(a: &[u64], b: &[u64]) -> u64 {
+    const L: usize = 8;
     let n = a.len().min(b.len());
     let (ca, ra) = a[..n].as_chunks::<L>();
     let (cb, rb) = b[..n].as_chunks::<L>();
-    let mut acc = [0u32; L];
+    let mut acc = [0u64; L];
     for (x, y) in ca.iter().zip(cb) {
         for i in 0..L {
-            acc[i] += (x[i] ^ y[i]).count_ones();
+            acc[i] += u64::from(x[i] != y[i]);
         }
     }
-    let mut sum: u32 = acc.iter().sum();
-    for (&x, &y) in ra.iter().zip(rb) {
-        sum += (x ^ y).count_ones();
+    let mut sum: u64 = acc.iter().sum();
+    for (x, y) in ra.iter().zip(rb) {
+        sum += u64::from(x != y);
     }
     sum
 }

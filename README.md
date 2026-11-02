@@ -95,9 +95,10 @@ With the `simd` feature:
 | wasm32 | SIMD128 (with `+simd128`) | Compile time |
 | Other | Portable | LLVM auto-vec |
 
-`innr::capabilities()` reports the level in use. Short vectors use portable
-code (threshold 16 dims for dense f32, 8 for dense f64, 32 for quantized u8,
-8 for integer slots). Requires Rust 1.89.
+`innr::capabilities()` reports the level in use and the per-kernel length
+thresholds; shorter inputs use portable code (16 dims for dense f32, 8 for
+dense f64, 32 for the u8 dot, 128 bytes for bit Hamming, 8 for integer
+slots). Requires Rust 1.89.
 
 ## Performance
 

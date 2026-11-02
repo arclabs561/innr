@@ -36,8 +36,8 @@
 //! | Other | Portable | LLVM auto-vectorizes |
 //!
 //! Short vectors use portable code (SIMD overhead not worthwhile); the
-//! threshold is per module: 16 dimensions for dense f32 ops, 8 for dense f64
-//! ops, 32 for the quantized `u8` ops, 8 for integer-slot ops.
+//! per-kernel thresholds are in [`backend::Thresholds`] and printed by
+//! `capabilities()`.
 //!
 //! Generic code can take a metric as a type parameter; see [`metric`].
 //!
@@ -189,12 +189,11 @@ pub use slot::{
 
 pub use topk::TopK;
 
-pub use backend::capabilities;
+pub use backend::{capabilities, Capabilities};
 
-/// Minimum vector dimension for SIMD to be worthwhile.
-///
-/// Below this, function call overhead outweighs SIMD benefits.
-pub(crate) const MIN_DIM_SIMD: usize = 16;
+/// Minimum vector dimension for the dense f32 SIMD kernels.
+#[cfg(feature = "simd")]
+pub(crate) const MIN_DIM_SIMD: usize = backend::THRESHOLDS.dense_f32;
 
 /// Threshold for treating a norm as "effectively zero".
 ///

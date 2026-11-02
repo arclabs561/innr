@@ -318,7 +318,7 @@ pub fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
 #[inline]
 fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
     #[cfg(feature = "simd")]
-    if a.len().min(b.len()) >= 16 {
+    if a.len().min(b.len()) >= crate::backend::THRESHOLDS.mixed_u8_f32 {
         return crate::arch::simd_dispatch!(
             crate::arch::isa(),
             s => crate::arch::kernels::mixed_dot_u8_f32(s, a, b),

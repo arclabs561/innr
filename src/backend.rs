@@ -1,13 +1,14 @@
 //! SIMD backend introspection: which kernel family will actually run.
 //!
 //! The SIMD level is detected once per call block (with the `simd` feature)
-//! and combined with the input length; callers never see it. These functions
+//! and combined with a per-kernel length threshold ([`Thresholds`](crate::backend::Thresholds)); callers
+//! never see either. These functions
 //! report the choice so perf work and bug reports don't have to re-derive it.
 //!
 //! ```
 //! use innr::backend::{dense_backend, Backend};
 //!
-//! println!("innr kernels run on {}", innr::capabilities());
+//! println!("innr: {}", innr::capabilities());
 //! let b = dense_backend(768); // SIMD when the `simd` feature is on
 //! println!("768-dim dense kernels run on {b}");
 //! assert_eq!(dense_backend(8), Backend::Portable); // below every dense threshold
@@ -28,11 +29,12 @@ pub enum Backend {
     Avx2Fma,
     /// NEON (always available on aarch64).
     Neon,
-    /// WebAssembly SIMD128, when compiled with `-C target-feature=+simd128`.
-    WasmSimd128,
     /// Scalar code, auto-vectorized by LLVM where possible. The only backend
     /// when the `simd` feature is off.
     Portable,
+    /// WebAssembly SIMD128, when compiled with `-C target-feature=+simd128`.
+    /// Declared last so existing variants keep their discriminants.
+    WasmSimd128,
 }
 
 impl fmt::Display for Backend {
@@ -48,15 +50,107 @@ impl fmt::Display for Backend {
     }
 }
 
-/// The SIMD level innr dispatches to on this machine, before any per-kernel
-/// length threshold. Always [`Backend::Portable`] without the `simd` feature.
+/// Input lengths at which the `simd` feature's dispatched kernels take over
+/// from the portable kernels, plus the portable small-input cutoffs.
+///
+/// Each SIMD threshold is the shortest input (elements, or bytes for
+/// `hamming_u8`) that runs the dispatched kernel; shorter inputs run the
+/// portable kernel. The values were set from consumer-shape benchmarks on an
+/// Apple M3 (NEON); x86 has not been measured yet and uses the same values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct Thresholds {
+    /// Dense `f32` kernels: dot, cosine, L1, squared L2, norm, MaxSim (per
+    /// token dimension) and `fast_cosine_dispatch`.
+    pub dense_f32: usize,
+    /// Dense `f64` kernels: dot, cosine, L1, squared L2, norm.
+    pub dense_f64: usize,
+    /// `u8` dot product.
+    pub dot_u8: usize,
+    /// Byte-packed bit Hamming distance, in bytes.
+    pub hamming_u8: usize,
+    /// Mixed `f32`-by-`u8` dot product.
+    pub mixed_u8_f32: usize,
+    /// `u16` and `u32` slot Hamming.
+    pub slot_u16_u32: usize,
+    /// `u64` slot Hamming; `None` means it always runs the portable kernel.
+    pub slot_u64: Option<usize>,
+    /// Portable dense `f32` kernels use a four-lane small-input path below
+    /// this length and sixteen lanes from it on.
+    pub small_f32: usize,
+    /// The same cutoff for the portable dense `f64` kernels.
+    pub small_f64: usize,
+}
+
+/// The thresholds the dispatchers use.
+pub(crate) const THRESHOLDS: Thresholds = Thresholds {
+    dense_f32: 16,
+    dense_f64: 8,
+    dot_u8: 32,
+    // SIMD measured no faster than the portable u64-word kernel up to 96 B,
+    // and about 1.35x faster from 128 B (2x at 512 B and up).
+    hamming_u8: 128,
+    mixed_u8_f32: 16,
+    slot_u16_u32: 8,
+    slot_u64: None,
+    small_f32: crate::portable::F32_LANES,
+    small_f64: crate::portable::F64_LANES,
+};
+
+/// The SIMD level innr dispatches to on this machine and the length
+/// thresholds at which it does. Returned by [`capabilities`].
+///
+/// `Display` prints one line suitable for benchmark output and bug reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct Capabilities {
+    /// The level the dispatched kernels run on, before any length threshold.
+    /// Always [`Backend::Portable`] without the `simd` feature.
+    pub backend: Backend,
+    /// Length thresholds per kernel family.
+    pub thresholds: Thresholds,
+}
+
+impl fmt::Display for Capabilities {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let t = &self.thresholds;
+        write!(f, "{}", self.backend)?;
+        if self.backend != Backend::Portable {
+            write!(
+                f,
+                " (simd from: dense_f32 {}, dense_f64 {}, dot_u8 {}, hamming_u8 {} B, \
+                 mixed_u8_f32 {}, slot_u16_u32 {}, slot_u64 ",
+                t.dense_f32, t.dense_f64, t.dot_u8, t.hamming_u8, t.mixed_u8_f32, t.slot_u16_u32,
+            )?;
+            match t.slot_u64 {
+                Some(n) => write!(f, "{n})")?,
+                None => f.write_str("never)")?,
+            }
+        }
+        write!(
+            f,
+            "; portable small path below: f32 {}, f64 {}",
+            t.small_f32, t.small_f64
+        )
+    }
+}
+
+/// The SIMD level and length thresholds innr uses on this machine.
 ///
 /// ```
-/// let level = innr::capabilities();
-/// println!("innr kernels run on {level}");
+/// let caps = innr::capabilities();
+/// println!("innr: {caps}"); // e.g. "neon (simd from: dense_f32 16, ...)"
+/// assert!(caps.thresholds.dense_f32 > 0);
 /// ```
 #[must_use]
-pub fn capabilities() -> Backend {
+pub fn capabilities() -> Capabilities {
+    Capabilities {
+        backend: level(),
+        thresholds: THRESHOLDS,
+    }
+}
+
+fn level() -> Backend {
     #[cfg(feature = "simd")]
     {
         use crate::arch::Isa;
@@ -82,8 +176,8 @@ pub fn capabilities() -> Backend {
 /// `l2_distance`, ...) select for `len`-dimensional vectors on this machine.
 #[must_use]
 pub fn dense_backend(len: usize) -> Backend {
-    if len >= crate::MIN_DIM_SIMD {
-        capabilities()
+    if len >= THRESHOLDS.dense_f32 {
+        level()
     } else {
         Backend::Portable
     }
@@ -93,12 +187,11 @@ pub fn dense_backend(len: usize) -> Backend {
 /// machine.
 #[must_use]
 pub fn slot_backend(len: usize) -> Backend {
-    #[cfg(feature = "simd")]
-    if len >= crate::slot::MIN_SLOTS_SIMD {
-        return capabilities();
+    if len >= THRESHOLDS.slot_u16_u32 {
+        level()
+    } else {
+        Backend::Portable
     }
-    let _ = len;
-    Backend::Portable
 }
 
 #[cfg(test)]
@@ -121,7 +214,19 @@ mod tests {
         assert_ne!(b, Backend::Neon);
         #[cfg(not(feature = "simd"))]
         assert_eq!(b, Backend::Portable);
-        assert_eq!(b, capabilities());
+        assert_eq!(b, capabilities().backend);
+    }
+
+    #[test]
+    fn capabilities_display_names_level_and_thresholds() {
+        let caps = capabilities();
+        let line = caps.to_string();
+        assert!(line.starts_with(&caps.backend.to_string()), "{line}");
+        assert!(line.contains("small path below: f32 16, f64 8"), "{line}");
+        if caps.backend != Backend::Portable {
+            assert!(line.contains("hamming_u8 128 B"), "{line}");
+            assert!(line.contains("slot_u64 never"), "{line}");
+        }
     }
 
     #[test]

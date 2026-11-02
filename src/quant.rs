@@ -116,9 +116,10 @@ pub fn dot_u8_wide_portable(a: &[u8], b: &[u8]) -> u64 {
 ///
 /// # SIMD Acceleration
 ///
-/// With the `simd` feature and `n >= 32`, dispatches at runtime to the best
-/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
-/// the portable kernel.
+/// With the `simd` feature and at least 128 bytes, dispatches at runtime to
+/// the best available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128);
+/// shorter inputs run the portable kernel, which XORs 64-bit words and
+/// measured as fast as the SIMD kernel below 128 bytes.
 ///
 /// # Panics
 ///

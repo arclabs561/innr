@@ -37,12 +37,15 @@ export CRITERION_HOME
 mkdir -p "$CRITERION_HOME"
 
 cd "$ROOT"
+load() { uptime | sed 's/.*load averages*: *//'; }
+load_before="$(load)"
 start=$(date +%s)
 echo "== portable build (--no-default-features)" >&2
 cargo bench --no-default-features "${BENCHES[@]}" -- ${FILTER[@]+"${FILTER[@]}"} >&2
 echo "== simd build (default features ${FEATURES[*]-})" >&2
 cargo bench ${FEATURES[@]+"${FEATURES[@]}"} "${BENCHES[@]}" -- ${FILTER[@]+"${FILTER[@]}"} >&2
 elapsed=$(( $(date +%s) - start ))
+load_after="$(load)"
 
 if [[ "$(uname -s)" == Darwin ]]; then
   CPU="$(sysctl -n machdep.cpu.brand_string)"
@@ -55,6 +58,7 @@ INNR_REPORT_ARCH="$(uname -m)-$(uname -s | tr '[:upper:]' '[:lower:]')" \
 INNR_REPORT_RUSTC="$(rustc -V)" \
 INNR_REPORT_REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
 INNR_REPORT_ELAPSED="$elapsed" \
+INNR_REPORT_LOAD="$load_before / $load_after ($(getconf _NPROCESSORS_ONLN) CPUs)" \
 INNR_REPORT_SETTINGS="warm-up ${INNR_BENCH_WARMUP_MS:-300} ms, measurement ${INNR_BENCH_MEASURE_MS:-1000} ms per bench${FEATURES[0]:+, NumKong enabled}" \
   python3 "$ROOT/benches/report.py" "$CRITERION_HOME" > "$OUT"
 echo "wrote $OUT (${elapsed}s of benchmarking; raw data in $CRITERION_HOME)" >&2

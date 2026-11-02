@@ -385,26 +385,35 @@ fn hamming(c: &mut Criterion) {
     g.finish();
 }
 
-/// A/A noise floor: the same kernel and inputs under two names. The spread
-/// between `aa_1` and `aa_2` is the smallest difference this harness can
-/// resolve on this machine; report.sh prints it beside the results.
-fn aa_noise(c: &mut Criterion) {
+/// A/A noise floor: the same kernel and inputs under different names.
+/// `aa_1` and `aa_2` run back to back at the start of this binary, `aa_3`
+/// at its end, so the spread covers both short-term noise and drift across
+/// the run (thermal state, other load). report.sh prints it beside the
+/// results and uses it as the tie band.
+fn aa_copies(c: &mut Criterion, copies: &[&str]) {
     let mut g = c.benchmark_group("aa_noise");
     for d in [128usize, 768] {
         let (a, b) = (data::f32s(d, 1), data::f32s(d, 2));
-        run(&mut g, &format!("{INNR}_aa_1"), d, || {
-            innr::dot(black_box(&a), black_box(&b))
-        });
-        run(&mut g, &format!("{INNR}_aa_2"), d, || {
-            innr::dot(black_box(&a), black_box(&b))
-        });
+        for copy in copies {
+            run(&mut g, &format!("{INNR}_{copy}"), d, || {
+                innr::dot(black_box(&a), black_box(&b))
+            });
+        }
     }
     g.finish();
+}
+
+fn aa_noise_first(c: &mut Criterion) {
+    aa_copies(c, &["aa_1", "aa_2"]);
+}
+
+fn aa_noise_last(c: &mut Criterion) {
+    aa_copies(c, &["aa_3"]);
 }
 
 criterion_group! {
     name = benches;
     config = innr_bench_support::config();
-    targets = aa_noise, pair_f32, pair_f64, hamming
+    targets = aa_noise_first, pair_f32, pair_f64, hamming, aa_noise_last
 }
 criterion_main!(benches);

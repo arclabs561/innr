@@ -73,18 +73,18 @@ def variant_key(v):
 
 
 def aa_floor(rows):
-    pairs = defaultdict(dict)
+    copies = defaultdict(dict)
     for r in rows:
         if r["group"] == "aa_noise":
-            build = r["variant"].rsplit("_aa_", 1)[0]
-            pairs[(build, r["param"])][r["variant"]] = r["median"]
+            build, copy = r["variant"].rsplit("_aa_", 1)
+            copies[(build, r["param"])][copy] = r["median"]
     spreads = []
     for (build, param), meds in sorted(
-        pairs.items(), key=lambda kv: (kv[0][0], param_key(kv[0][1]))
+        copies.items(), key=lambda kv: (kv[0][0], param_key(kv[0][1]))
     ):
-        if len(meds) == 2:
-            a, b = sorted(meds.values())
-            spreads.append((build, param, a, b, b / a - 1.0))
+        if len(meds) >= 2:
+            vals = list(meds.values())
+            spreads.append((build, param, meds, max(vals) / min(vals) - 1.0))
     return spreads
 
 
@@ -103,6 +103,7 @@ def main():
     out.append(f"- innr revision: {env('INNR_REPORT_REV', '?')}")
     out.append(f"- Settings: {env('INNR_REPORT_SETTINGS', '?')}")
     out.append(f"- Benchmark wall time: {env('INNR_REPORT_ELAPSED', '?')} s")
+    out.append(f"- Load average before / after: {env('INNR_REPORT_LOAD', '?')}")
     out.append("- Command: `benches/report.sh OUT.md` (see the script header)")
     out.append("")
     out.append("Cells are Criterion medians. `innr_portable` is innr built with")
@@ -115,19 +116,22 @@ def main():
     out.append("")
 
     spreads = aa_floor(rows)
-    floor = max([MIN_FLOOR] + [s[4] for s in spreads])
+    floor = max([MIN_FLOOR] + [s[3] for s in spreads])
     out.append("## A/A noise floor")
     out.append("")
     out.append(
-        "The same kernel (`innr::dot`) and inputs benchmarked twice under two names."
+        "The same kernel (`innr::dot`) and inputs under three names: copies 1 and 2"
     )
+    out.append(
+        "run back to back at the start of `consumer_pair`, copy 3 at its end, so the"
+    )
+    out.append("spread (max / min - 1) includes drift across the run.")
     out.append("")
-    out.append("| build | dim | run 1 | run 2 | spread |")
-    out.append("|---|---:|---:|---:|---:|")
-    for build, param, a, b, spread in spreads:
-        out.append(
-            f"| {build} | {param} | {fmt_time(a)} | {fmt_time(b)} | {spread * 100:.1f}% |"
-        )
+    out.append("| build | dim | copy 1 | copy 2 | copy 3 | spread |")
+    out.append("|---|---:|---:|---:|---:|---:|")
+    for build, param, meds, spread in spreads:
+        cells = [fmt_time(meds[c]) if c in meds else "—" for c in ("1", "2", "3")]
+        out.append(f"| {build} | {param} | {' | '.join(cells)} | {spread * 100:.1f}% |")
     out.append("")
     out.append(
         f"Tie band for verdicts: ±{floor * 100:.1f}% (the largest A/A spread, at least {MIN_FLOOR * 100:.0f}%)."

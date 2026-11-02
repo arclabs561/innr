@@ -331,10 +331,7 @@ fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
 /// Portable mixed-precision dot product.
 #[inline]
 pub(crate) fn mixed_dot_u8_f32_portable(a: &[f32], b: &[u8]) -> f32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&af, &bu)| af * bu as f32)
-        .sum()
+    crate::portable::mixed_dot_u8_f32(a, b)
 }
 
 /// Batch kNN over scalar-quantized vectors.

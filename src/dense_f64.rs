@@ -4,7 +4,8 @@
 //! precision (scientific computing, PageRank-style accumulation, statistical
 //! reductions). With the `simd` feature the reductions dispatch to SIMD at
 //! runtime (AVX-512 / AVX2 on x86, NEON on aarch64, WASM SIMD128) with a
-//! 4-way-unrolled portable fallback.
+//! portable fallback that keeps eight accumulator lanes for the
+//! auto-vectorizer.
 
 use crate::metric::{eval_unchecked, Cosine, Dot, L2Sq, L1};
 
@@ -29,27 +30,7 @@ pub fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
 
 #[inline]
 pub(crate) fn dot_f64_portable(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f64;
-    let mut s1 = 0.0f64;
-    let mut s2 = 0.0f64;
-    let mut s3 = 0.0f64;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += a[base] * b[base];
-        s1 += a[base + 1] * b[base + 1];
-        s2 += a[base + 2] * b[base + 2];
-        s3 += a[base + 3] * b[base + 3];
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        result += a[i] * b[i];
-    }
-    result
+    crate::portable::fold_f64(a, b, |x, y| x * y)
 }
 
 /// L2 norm of an `f64` vector: `sqrt(Σ(v[i]²))`.
@@ -128,32 +109,10 @@ pub fn l2_distance_squared_f64(a: &[f64], b: &[f64]) -> f64 {
 
 #[inline]
 pub(crate) fn l2_distance_squared_f64_portable(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f64;
-    let mut s1 = 0.0f64;
-    let mut s2 = 0.0f64;
-    let mut s3 = 0.0f64;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        let d0 = a[base] - b[base];
-        let d1 = a[base + 1] - b[base + 1];
-        let d2 = a[base + 2] - b[base + 2];
-        let d3 = a[base + 3] - b[base + 3];
-        s0 += d0 * d0;
-        s1 += d1 * d1;
-        s2 += d2 * d2;
-        s3 += d3 * d3;
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        let d = a[i] - b[i];
-        result += d * d;
-    }
-    result
+    crate::portable::fold_f64(a, b, |x, y| {
+        let d = x - y;
+        d * d
+    })
 }
 
 /// L2 (Euclidean) distance: `sqrt(Σ((a[i] - b[i])²))`.
@@ -184,27 +143,7 @@ pub fn l1_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 
 #[inline]
 pub(crate) fn l1_distance_f64_portable(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f64;
-    let mut s1 = 0.0f64;
-    let mut s2 = 0.0f64;
-    let mut s3 = 0.0f64;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += (a[base] - b[base]).abs();
-        s1 += (a[base + 1] - b[base + 1]).abs();
-        s2 += (a[base + 2] - b[base + 2]).abs();
-        s3 += (a[base + 3] - b[base + 3]).abs();
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        result += (a[i] - b[i]).abs();
-    }
-    result
+    crate::portable::fold_f64(a, b, |x, y| (x - y).abs())
 }
 
 #[cfg(test)]

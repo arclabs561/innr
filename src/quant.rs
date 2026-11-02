@@ -88,10 +88,8 @@ pub fn checked_dot_u8(a: &[u8], b: &[u8]) -> Option<u32> {
     u32::try_from(dot_u8_wide(a, b)).ok()
 }
 
-/// Portable (non-SIMD) u8 dot product with 4-way unrolled accumulators.
-///
-/// Uses four independent u32 accumulators to avoid data-dependency stalls
-/// on pipelined CPUs. LLVM typically vectorizes this further.
+/// Portable (non-SIMD) u8 dot product with sixteen `u32` accumulator lanes
+/// that LLVM vectorizes.
 #[inline]
 #[must_use]
 pub fn dot_u8_portable(a: &[u8], b: &[u8]) -> u32 {
@@ -106,29 +104,7 @@ pub fn dot_u8_portable(a: &[u8], b: &[u8]) -> u32 {
 #[inline]
 #[must_use]
 pub fn dot_u8_wide_portable(a: &[u8], b: &[u8]) -> u64 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0: u64 = 0;
-    let mut s1: u64 = 0;
-    let mut s2: u64 = 0;
-    let mut s3: u64 = 0;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += a[base] as u64 * b[base] as u64;
-        s1 += a[base + 1] as u64 * b[base + 1] as u64;
-        s2 += a[base + 2] as u64 * b[base + 2] as u64;
-        s3 += a[base + 3] as u64 * b[base + 3] as u64;
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-
-    for i in (chunks * 4)..n {
-        result += a[i] as u64 * b[i] as u64;
-    }
-
-    result
+    crate::portable::dot_u8_wide(a, b)
 }
 
 /// Hamming distance between two byte-packed bit vectors.
@@ -176,10 +152,7 @@ pub fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 #[inline]
 #[must_use]
 pub fn hamming_portable(a: &[u8], b: &[u8]) -> u32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x ^ y).count_ones())
-        .sum()
+    crate::portable::hamming(a, b)
 }
 
 #[cfg(test)]

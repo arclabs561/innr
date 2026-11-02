@@ -19,6 +19,12 @@
   in the last bits (up to about 2e-6 relative on the test fixtures). Accuracy tests
   now bound every reduction against a higher-precision reference instead of
   pinning exact bits.
+- The portable kernels (dot, squared L2, L1, cosine and norm for `f32` and
+  `f64`, mixed `f32`-by-`u8` dot, `u8` dot and byte Hamming) keep 8 to 32
+  independent accumulator lanes over `as_chunks` blocks with a scalar
+  remainder, so LLVM vectorizes them without reassociating float adds.
+  Portable f32 results can differ from 0.6.3 in the last bits (up to about
+  6e-6 relative on the test fixtures); integer results are unchanged.
 - `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
   SIMD-sized inputs instead of a refined hardware rsqrt estimate.
 - MSRV is Rust 1.89, the minimum for `fearless_simd` 1.2.

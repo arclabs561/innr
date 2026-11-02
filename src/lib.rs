@@ -102,6 +102,9 @@
 #[cfg(feature = "simd")]
 mod arch;
 
+/// Portable kernels written for the auto-vectorizer.
+mod portable;
+
 #[cfg(test)]
 mod accuracy;
 

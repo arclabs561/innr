@@ -34,52 +34,62 @@ macro_rules! tree_sum {
     };
 }
 tree_sum!(tree_sum_f32, f32);
-tree_sum!(tree_sum_f64, f64);
 
 macro_rules! fold_pairs {
-    ($name:ident, $t:ty, $lanes:expr, $tree:ident) => {
+    ($name:ident, $t:ty, $lanes:expr) => {
         /// `Σ term(a[i], b[i])` over the common prefix of `a` and `b`.
+        ///
+        /// Wide blocks of `LANES` accumulate into a lane array, which is then
+        /// folded into four lanes; the leftover whole groups of four continue
+        /// in those four lanes, and fewer than four elements finish in a
+        /// scalar tail. One four-lane horizontal sum ends the reduction. A
+        /// separate wide tree sum plus a second sum for the leftover let LLVM
+        /// scalarize the tree on aarch64 (lane extracts, +50% at d16 to d32
+        /// on an Apple M3 Max), and a scalar loop over the whole leftover was
+        /// one long dependent add chain.
         #[inline(always)]
         pub(crate) fn $name(a: &[$t], b: &[$t], term: impl Fn($t, $t) -> $t) -> $t {
             let n = a.len().min(b.len());
-            // Four lanes and a short scalar tail: used for small dimensions
-            // (2-d points, short sketches), where it measured faster than the
-            // wide lane array and than a sequential loop, and for the
-            // leftover after the wide blocks, where a scalar loop over up to
-            // LANES - 1 elements was one long dependent add chain (Apple M3
-            // Max, d24: 4.4 ns against 2.6 ns at d32).
-            let narrow = |a: &[$t], b: &[$t]| -> $t {
-                let (ca, ra) = a.as_chunks::<4>();
-                let (cb, rb) = b.as_chunks::<4>();
-                let mut acc = [0.0; 4];
+            let (mut a, mut b) = (&a[..n], &b[..n]);
+            let mut q = [0.0; 4];
+            if n >= $lanes {
+                let (ca, ra) = a.as_chunks::<{ $lanes }>();
+                let (cb, rb) = b.as_chunks::<{ $lanes }>();
+                let mut acc = [0.0; $lanes];
                 for (x, y) in ca.iter().zip(cb) {
-                    for i in 0..4 {
+                    for i in 0..$lanes {
                         acc[i] += term(x[i], y[i]);
                     }
                 }
-                let mut tail = 0.0;
-                for (&x, &y) in ra.iter().zip(rb) {
-                    tail += term(x, y);
+                // Halve pairwise down to four lanes: two dependent vector
+                // adds for sixteen lanes instead of a chain of four.
+                let mut w = $lanes;
+                while w > 4 {
+                    w /= 2;
+                    for i in 0..w {
+                        acc[i] += acc[i + w];
+                    }
                 }
-                (acc[0] + acc[2]) + (acc[1] + acc[3]) + tail
-            };
-            if n < $lanes {
-                return narrow(&a[..n], &b[..n]);
+                q.copy_from_slice(&acc[..4]);
+                (a, b) = (ra, rb);
             }
-            let (ca, ra) = a[..n].as_chunks::<{ $lanes }>();
-            let (cb, rb) = b[..n].as_chunks::<{ $lanes }>();
-            let mut acc = [0.0; $lanes];
+            let (ca, ra) = a.as_chunks::<4>();
+            let (cb, rb) = b.as_chunks::<4>();
             for (x, y) in ca.iter().zip(cb) {
-                for i in 0..$lanes {
-                    acc[i] += term(x[i], y[i]);
+                for i in 0..4 {
+                    q[i] += term(x[i], y[i]);
                 }
             }
-            $tree(acc) + narrow(ra, rb)
+            let mut tail = 0.0;
+            for (&x, &y) in ra.iter().zip(rb) {
+                tail += term(x, y);
+            }
+            (q[0] + q[2]) + (q[1] + q[3]) + tail
         }
     };
 }
-fold_pairs!(fold_f32, f32, F32_LANES, tree_sum_f32);
-fold_pairs!(fold_f64, f64, F64_LANES, tree_sum_f64);
+fold_pairs!(fold_f32, f32, F32_LANES);
+fold_pairs!(fold_f64, f64, F64_LANES);
 
 /// `(Σ ab, Σ a², Σ b²)` as three [`fold_f32`] passes over the common prefix.
 ///
@@ -195,8 +205,6 @@ mod tests {
     fn tree_sum_adds_every_lane() {
         let v: [f32; 16] = core::array::from_fn(|i| (i + 1) as f32);
         assert_eq!(tree_sum_f32(v), 136.0);
-        let v: [f64; 8] = core::array::from_fn(|i| (i + 1) as f64);
-        assert_eq!(tree_sum_f64(v), 36.0);
     }
 
     #[test]

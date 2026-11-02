@@ -42,12 +42,15 @@ macro_rules! fold_pairs {
         #[inline(always)]
         pub(crate) fn $name(a: &[$t], b: &[$t], term: impl Fn($t, $t) -> $t) -> $t {
             let n = a.len().min(b.len());
-            if n < $lanes {
-                // Small dimensions (2-d points, short sketches): four lanes
-                // and a short tail, measured faster than the wide lane array
-                // and than a sequential loop below one wide block.
-                let (ca, ra) = a[..n].as_chunks::<4>();
-                let (cb, rb) = b[..n].as_chunks::<4>();
+            // Four lanes and a short scalar tail: used for small dimensions
+            // (2-d points, short sketches), where it measured faster than the
+            // wide lane array and than a sequential loop, and for the
+            // leftover after the wide blocks, where a scalar loop over up to
+            // LANES - 1 elements was one long dependent add chain (Apple M3
+            // Max, d24: 4.4 ns against 2.6 ns at d32).
+            let narrow = |a: &[$t], b: &[$t]| -> $t {
+                let (ca, ra) = a.as_chunks::<4>();
+                let (cb, rb) = b.as_chunks::<4>();
                 let mut acc = [0.0; 4];
                 for (x, y) in ca.iter().zip(cb) {
                     for i in 0..4 {
@@ -58,7 +61,10 @@ macro_rules! fold_pairs {
                 for (&x, &y) in ra.iter().zip(rb) {
                     tail += term(x, y);
                 }
-                return (acc[0] + acc[2]) + (acc[1] + acc[3]) + tail;
+                (acc[0] + acc[2]) + (acc[1] + acc[3]) + tail
+            };
+            if n < $lanes {
+                return narrow(&a[..n], &b[..n]);
             }
             let (ca, ra) = a[..n].as_chunks::<{ $lanes }>();
             let (cb, rb) = b[..n].as_chunks::<{ $lanes }>();
@@ -68,43 +74,28 @@ macro_rules! fold_pairs {
                     acc[i] += term(x[i], y[i]);
                 }
             }
-            let mut tail = 0.0;
-            for (&x, &y) in ra.iter().zip(rb) {
-                tail += term(x, y);
-            }
-            $tree(acc) + tail
+            $tree(acc) + narrow(ra, rb)
         }
     };
 }
 fold_pairs!(fold_f32, f32, F32_LANES, tree_sum_f32);
 fold_pairs!(fold_f64, f64, F64_LANES, tree_sum_f64);
 
-/// `(Σ ab, Σ a², Σ b²)` in one pass. Eight lanes per sum keep the 24
-/// accumulators within 16 SSE registers' worth of pressure on x86.
+/// `(Σ ab, Σ a², Σ b²)` as three [`fold_f32`] passes over the common prefix.
+///
+/// A fused single pass with three accumulator arrays was SLP-vectorized
+/// across the sums instead of across lanes (two-wide shuffles and stack
+/// spills on x86_64), and three passes measured 1.4x to 2x faster from d32
+/// up on both AVX2-class x86 and Apple NEON. The re-reads hit L1 at
+/// embedding sizes.
 #[inline(always)]
 pub(crate) fn cosine_parts_f32(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
-    const L: usize = 8;
     let n = a.len().min(b.len());
-    let (ca, ra) = a[..n].as_chunks::<L>();
-    let (cb, rb) = b[..n].as_chunks::<L>();
-    let (mut ab, mut aa, mut bb) = ([0.0f32; L], [0.0f32; L], [0.0f32; L]);
-    for (x, y) in ca.iter().zip(cb) {
-        for i in 0..L {
-            ab[i] += x[i] * y[i];
-            aa[i] += x[i] * x[i];
-            bb[i] += y[i] * y[i];
-        }
-    }
-    let (mut tab, mut taa, mut tbb) = (0.0f32, 0.0f32, 0.0f32);
-    for (&x, &y) in ra.iter().zip(rb) {
-        tab += x * y;
-        taa += x * x;
-        tbb += y * y;
-    }
+    let (a, b) = (&a[..n], &b[..n]);
     (
-        tree_sum_f32(ab) + tab,
-        tree_sum_f32(aa) + taa,
-        tree_sum_f32(bb) + tbb,
+        fold_f32(a, b, |x, y| x * y),
+        fold_f32(a, a, |x, y| x * y),
+        fold_f32(b, b, |x, y| x * y),
     )
 }
 

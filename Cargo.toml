@@ -39,6 +39,9 @@ sparse = []
 # making them usable directly as hnsw_rs distances (hnsw_rs binds to
 # anndists's trait). Off by default to keep interop dependencies opt-in.
 anndists = ["dep:anndists"]
+# Bench-only: adds NumKong (C kernels, built with `cc`) as a reference column
+# in the consumer benches. Not part of the library API.
+bench-numkong = ["dep:numkong"]
 
 [dependencies]
 # With default features off, core operations need only std.
@@ -47,6 +50,8 @@ anndists = { version = "0.1.5", optional = true }
 # Safe SIMD with runtime dispatch. innr uses only its safe portable vector
 # types and `Simd::vectorize`, so no `unsafe` expands into this crate.
 fearless_simd = { version = "1.2", optional = true }
+# Bench-only reference implementation; see the `bench-numkong` feature.
+numkong = { version = "=7.8.5", optional = true }
 
 [dev-dependencies]
 # Tests run the SIMD kernels on fearless_simd's scalar `Fallback` level too,
@@ -58,6 +63,10 @@ qntz = { version = "0.2.1", features = ["rabitq"] }
 rand = "0.9"
 # Proves the anndists feature against the real consumer (tests/anndists_interop.rs).
 hnsw_rs = "0.3"
+# Consumer-shape benches: wass's ndarray fallback, and shared generators plus
+# fallbacks that need unsafe intrinsics (innr forbids unsafe in its targets).
+ndarray = "0.16"
+innr-bench-support = { path = "benches/support" }
 
 [[example]]
 name = "maxsim_colbert"
@@ -92,6 +101,22 @@ harness = false
 
 [[bench]]
 name = "batch"
+harness = false
+
+[[bench]]
+name = "consumer_pair"
+harness = false
+
+[[bench]]
+name = "consumer_matvec"
+harness = false
+
+[[bench]]
+name = "consumer_scan"
+harness = false
+
+[[bench]]
+name = "consumer_maxsim"
 harness = false
 
 [lints.rust]

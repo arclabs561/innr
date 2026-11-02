@@ -42,6 +42,9 @@ where
     let n = a.len().min(b.len());
     let (a, b) = (&a[..n], &b[..n]);
     let l = V::LEN;
+    if n < ACC * l {
+        return fold_float_short(simd, a, b, zero, step, tail);
+    }
     let mut s = [V::splat(simd, zero); ACC];
 
     let mut ca = a.chunks_exact(ACC * l);
@@ -78,6 +81,59 @@ where
     }
     let mut sum = s[0].reduce_sum();
     for (&x, &y) in ra.remainder().iter().zip(rb.remainder()) {
+        sum = tail(sum, x, y);
+    }
+    sum
+}
+
+/// [`fold_float`] for inputs shorter than one main-loop block (`ACC`
+/// vectors). With eight accumulators the result waits on three dependent
+/// vector adds even when only one or two were used; at d16 on AVX2 that
+/// epilogue dominated the call (5.9 ns against 5.0 for a two-accumulator
+/// kernel). Two accumulators end in a single add.
+#[inline(always)]
+fn fold_float_short<S, V>(
+    simd: S,
+    a: &[V::Element],
+    b: &[V::Element],
+    zero: V::Element,
+    step: impl Fn(V, V, V) -> V,
+    tail: impl Fn(V::Element, V::Element, V::Element) -> V::Element,
+) -> V::Element
+where
+    S: Simd,
+    V: SimdFloat<S>,
+{
+    let l = V::LEN;
+    let mut s0 = V::splat(simd, zero);
+    let mut s1 = V::splat(simd, zero);
+    let mut ca = a.chunks_exact(2 * l);
+    let mut cb = b.chunks_exact(2 * l);
+    for (x, y) in (&mut ca).zip(&mut cb) {
+        s0 = step(
+            s0,
+            V::from_slice(simd, &x[..l]),
+            V::from_slice(simd, &y[..l]),
+        );
+        s1 = step(
+            s1,
+            V::from_slice(simd, &x[l..]),
+            V::from_slice(simd, &y[l..]),
+        );
+    }
+    let (ra, rb) = (ca.remainder(), cb.remainder());
+    let (ra, rb) = if ra.len() >= l {
+        s0 = step(
+            s0,
+            V::from_slice(simd, &ra[..l]),
+            V::from_slice(simd, &rb[..l]),
+        );
+        (&ra[l..], &rb[l..])
+    } else {
+        (ra, rb)
+    };
+    let mut sum = (s0 + s1).reduce_sum();
+    for (&x, &y) in ra.iter().zip(rb) {
         sum = tail(sum, x, y);
     }
     sum

@@ -42,22 +42,15 @@
 //! # Dispatch
 //!
 //! [`slot_hamming_u16`], [`slot_hamming_u32`], and [`slot_hamming_u64`] each
-//! use the crate's runtime-dispatch pattern (AVX-512 > AVX2 > NEON > portable);
+//! use the crate's runtime-dispatch pattern (with `simd`: AVX-512 > AVX2 >
+//! NEON > WASM SIMD128 > portable);
 //! `u16` is the b=16 b-bit width and packs the most lanes per register. For
 //! any other slot type the generic [`slot_hamming`] relies on LLVM
 //! auto-vectorization of the integer-compare loop.
 
-// arch is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
-/// Minimum slot count for the AVX2 / NEON paths to be worthwhile.
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
+/// Minimum slot count for the SIMD paths to be worthwhile.
+#[cfg(feature = "simd")]
 pub(crate) const MIN_SLOTS_SIMD: usize = 8;
-
-/// Minimum slot count for the AVX-512 path (16 lanes).
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-pub(crate) const MIN_SLOTS_AVX512: usize = 16;
 
 /// Integer-slot Hamming distance over `u32` slots: the number of positions
 /// where `a[i] != b[i]`.
@@ -69,11 +62,9 @@ pub(crate) const MIN_SLOTS_AVX512: usize = 16;
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512F on x86_64 (runtime detection, n >= 16)
-/// - AVX2 on x86_64 (runtime detection, n >= 8)
-/// - NEON on aarch64 (always available, n >= 8)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 8`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -100,34 +91,14 @@ pub fn slot_hamming_u32(a: &[u32], b: &[u32]) -> u32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_SLOTS_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::slot_hamming_u32_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_SLOTS_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::slot_hamming_u32_avx2(simd, a, b);
-            }
-        }
+    #[cfg(feature = "simd")]
+    if a.len() >= MIN_SLOTS_SIMD {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::slot_ne_u32(s, a, b),
+            _ => slot_hamming_u32_portable(a, b),
+        );
     }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_SLOTS_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::slot_hamming_u32_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
     slot_hamming_u32_portable(a, b)
 }
 
@@ -143,7 +114,7 @@ pub fn slot_hamming_u32_portable(a: &[u32], b: &[u32]) -> u32 {
 /// b-bit collision correction is negligible so matches/k estimates Jaccard
 /// directly).
 ///
-/// AVX-512BW / AVX2 on x86_64, NEON on aarch64, portable elsewhere. Panics on
+/// SIMD-dispatched with the `simd` feature, portable otherwise. Panics on
 /// a length mismatch; returns the differing-slot count (fits `u32` for any
 /// realistic sketch).
 ///
@@ -164,33 +135,15 @@ pub fn slot_hamming_u16(a: &[u16], b: &[u16]) -> u32 {
         a.len(),
         b.len()
     );
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= 32 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::slot_hamming_u16_avx512(simd, a, b);
-            }
-        }
-        if n >= 16 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::slot_hamming_u16_avx2(simd, a, b);
-            }
-        }
+    #[cfg(feature = "simd")]
+    if a.len() >= MIN_SLOTS_SIMD {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::slot_ne_u16(s, a, b),
+            _ => a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32,
+        );
     }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= 8 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::slot_hamming_u16_neon(simd, a, b);
-            }
-        }
-    }
-    #[allow(unreachable_code)]
-    {
-        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32
-    }
+    a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u32
 }
 
 /// Count differing `u64` slots: the SIMD-accelerated path for 64-bit MinHash
@@ -217,33 +170,15 @@ pub fn slot_hamming_u64(a: &[u64], b: &[u64]) -> u64 {
         a.len(),
         b.len()
     );
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= 8 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::slot_hamming_u64_avx512(simd, a, b);
-            }
-        }
-        if n >= 4 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::slot_hamming_u64_avx2(simd, a, b);
-            }
-        }
+    #[cfg(feature = "simd")]
+    if a.len() >= MIN_SLOTS_SIMD {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::slot_ne_u64(s, a, b),
+            _ => a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64,
+        );
     }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= 2 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::slot_hamming_u64_neon(simd, a, b);
-            }
-        }
-    }
-    #[allow(unreachable_code)]
-    {
-        a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
-    }
+    a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
 }
 
 /// Generic integer-slot Hamming distance: the number of positions where
@@ -452,7 +387,7 @@ mod tests {
 
     #[test]
     fn slot_hamming_u16_matches_reference_across_boundaries() {
-        // Cross the u16 dispatch boundaries (AVX-512BW=32, AVX2=16, NEON=8).
+        // Cross the u16 vector widths (32 lanes AVX-512, 16 AVX2, 8 NEON).
         for n in [1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 100, 257, 1024] {
             for seed in 0..4u32 {
                 let a: Vec<u16> = (0..n as u32)

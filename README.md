@@ -17,12 +17,17 @@ The published 0.6.3 dispatches with its own `std::arch` kernels, has no
 `simd` feature, and declares Rust 1.89. The rest of this README
 describes the unreleased source checkout, which differs as follows.
 
-The default `simd` feature uses `pulp` for safe runtime-dispatched kernels.
-Set `default-features = false` for dependency-free portable kernels. The
-checkout pins Pulp to git commit `601de0c071ba32df3fd7ff33fc4218c9bd712aba`
-(which uses `pastey`), so it cannot be published to crates.io as is. innr
-forbids unsafe code in its own source; Pulp uses unsafe code internally
-behind its safe API.
+The default build has no dependencies and uses portable kernels written for
+the auto-vectorizer. The optional `simd` feature adds runtime-dispatched
+kernels through [`fearless_simd`](https://crates.io/crates/fearless_simd).
+innr forbids unsafe code in its own source and uses only `fearless_simd`'s
+safe API; `fearless_simd` confines its unsafe code to its own audited
+target-feature wrappers.
+
+```toml
+# Unreleased; from the source checkout until the next release.
+innr = { git = "https://github.com/arclabs561/innr", features = ["simd"] }
+```
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -80,22 +85,27 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 
 ## SIMD Dispatch
 
-| Architecture | Instructions | Detection |
-|--------------|--------------|-----------|
-| x86_64 | x86-64-v4 (Pulp V4, including AVX-512) | Runtime |
-| x86_64 | x86-64-v3 (Pulp V3, including AVX2 + FMA) | Runtime |
+With the `simd` feature:
+
+| Architecture | Level | Detection |
+|--------------|-------|-----------|
+| x86 / x86_64 | AVX-512 (Ice Lake-class) | Runtime |
+| x86 / x86_64 | AVX2 + FMA (x86-64-v3) | Runtime |
 | aarch64 | NEON | Always |
+| wasm32 | SIMD128 (with `+simd128`) | Compile time |
 | Other | Portable | LLVM auto-vec |
 
-Short vectors use portable code (threshold 16 dims for dense f32, 32 for quantized u8, 8 for integer slots). This development branch requires Rust 1.94 for the pinned Pulp backend's x86 intrinsics.
+`innr::capabilities()` reports the level in use. Short vectors use portable
+code (threshold 16 dims for dense f32, 8 for dense f64, 32 for quantized u8,
+8 for integer slots). Requires Rust 1.89.
 
 ## Performance
 
 ![Benchmark throughput](docs/bench_throughput.png)
 
 *Cache-resident, single-core criterion runs of innr 0.1.5 on Apple Silicon
-(NEON), transcribed into `scripts/plot_benchmarks.py`. They predate the Pulp
-backend; run `cargo bench` for current numbers on your hardware.*
+(NEON), transcribed into `scripts/plot_benchmarks.py`. They predate the
+current kernels; run `cargo bench` for current numbers on your hardware.*
 
 Results depend on the CPU, compiler, vector length, and memory behavior.
 AVX-512 paths are executed and differential-tested in CI under Intel SDE.

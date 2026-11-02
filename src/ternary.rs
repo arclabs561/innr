@@ -195,12 +195,16 @@ pub fn ternary_dot(a: &PackedTernary, b: &PackedTernary) -> i32 {
     );
     assert_eq!(a.data.len(), b.data.len());
 
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    #[cfg(all(feature = "simd", any(target_arch = "x86", target_arch = "x86_64")))]
     {
         // Running the integer loop under a POPCNT-enabled token turns each
         // `count_ones` into one `popcnt`.
-        if let Some(simd) = pulp::x86::V2::try_new() {
-            return simd.vectorize(|| ternary_dot_popcnt(&a.data, &b.data));
+        if let Some(simd) = fearless_simd::Level::new().as_sse4_2() {
+            return fearless_simd::Simd::vectorize(
+                simd,
+                #[inline(always)]
+                || ternary_dot_popcnt(&a.data, &b.data),
+            );
         }
     }
 
@@ -248,8 +252,8 @@ fn ternary_dot_portable(a: &[u64], b: &[u64]) -> i32 {
     same_count as i32 - diff_count as i32
 }
 
-/// x86_64 POPCNT implementation.
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
+/// x86 POPCNT implementation.
+#[cfg(all(feature = "simd", any(target_arch = "x86", target_arch = "x86_64")))]
 #[inline(always)]
 fn ternary_dot_popcnt(a: &[u64], b: &[u64]) -> i32 {
     let mut same_count: i64 = 0;

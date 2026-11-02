@@ -1,12 +1,13 @@
 //! SIMD backend introspection: which kernel family will actually run.
 //!
-//! Dispatch is per-call from CPU detection plus input length, and invisible
-//! to callers. These functions report the choice so perf work and bug
-//! reports don't have to re-derive it.
+//! The SIMD level is detected once per call block (with the `simd` feature)
+//! and combined with the input length; callers never see it. These functions
+//! report the choice so perf work and bug reports don't have to re-derive it.
 //!
 //! ```
 //! use innr::backend::{dense_backend, Backend};
 //!
+//! println!("innr kernels run on {}", innr::capabilities());
 //! let b = dense_backend(768); // SIMD when the `simd` feature is on
 //! println!("768-dim dense kernels run on {b}");
 //! assert_eq!(dense_backend(8), Backend::Portable); // below every dense threshold
@@ -18,12 +19,17 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Backend {
-    /// AVX-512: the x86-64-v4 level (AVX-512F/BW/CD/DQ/VL), pulp's `V4` token.
+    /// Ice Lake-class AVX-512 (AVX-512F/BW/CD/DQ/VL plus VPOPCNTDQ, BITALG,
+    /// VBMI/VBMI2, VNNI, IFMA, GFNI, VAES): fearless_simd's `Avx512` level.
+    /// CPUs with only the older AVX-512 subset run [`Backend::Avx2Fma`].
     Avx512,
-    /// AVX2 + FMA: the x86-64-v3 level (AVX2, FMA, BMI1/2, LZCNT), pulp's `V3`.
+    /// AVX2 + FMA: the x86-64-v3 level (AVX2, FMA, BMI1/2, F16C, LZCNT,
+    /// MOVBE, POPCNT), fearless_simd's `Avx2` level.
     Avx2Fma,
     /// NEON (always available on aarch64).
     Neon,
+    /// WebAssembly SIMD128, when compiled with `-C target-feature=+simd128`.
+    WasmSimd128,
     /// Scalar code, auto-vectorized by LLVM where possible. The only backend
     /// when the `simd` feature is off.
     Portable,
@@ -35,9 +41,40 @@ impl fmt::Display for Backend {
             Backend::Avx512 => "avx512",
             Backend::Avx2Fma => "avx2+fma",
             Backend::Neon => "neon",
+            Backend::WasmSimd128 => "wasm-simd128",
             Backend::Portable => "portable",
         };
         f.write_str(s)
+    }
+}
+
+/// The SIMD level innr dispatches to on this machine, before any per-kernel
+/// length threshold. Always [`Backend::Portable`] without the `simd` feature.
+///
+/// ```
+/// let level = innr::capabilities();
+/// println!("innr kernels run on {level}");
+/// ```
+#[must_use]
+pub fn capabilities() -> Backend {
+    #[cfg(feature = "simd")]
+    {
+        use crate::arch::Isa;
+        match crate::arch::isa() {
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            Isa::Avx512(_) => Backend::Avx512,
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            Isa::Avx2(_) => Backend::Avx2Fma,
+            #[cfg(target_arch = "aarch64")]
+            Isa::Neon(_) => Backend::Neon,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            Isa::Wasm(_) => Backend::WasmSimd128,
+            Isa::Portable => Backend::Portable,
+        }
+    }
+    #[cfg(not(feature = "simd"))]
+    {
+        Backend::Portable
     }
 }
 
@@ -45,43 +82,20 @@ impl fmt::Display for Backend {
 /// `l2_distance`, ...) select for `len`-dimensional vectors on this machine.
 #[must_use]
 pub fn dense_backend(len: usize) -> Backend {
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if len >= crate::dense::MIN_DIM_AVX512 && pulp::x86::V4::try_new().is_some() {
-            return Backend::Avx512;
-        }
-        if len >= crate::MIN_DIM_SIMD && pulp::x86::V3::try_new().is_some() {
-            return Backend::Avx2Fma;
-        }
+    if len >= crate::MIN_DIM_SIMD {
+        capabilities()
+    } else {
+        Backend::Portable
     }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if len >= crate::MIN_DIM_SIMD {
-            return Backend::Neon;
-        }
-    }
-    let _ = len;
-    Backend::Portable
 }
 
 /// Backend `slot_hamming_u32` selects for `len`-slot sketches on this
 /// machine.
 #[must_use]
 pub fn slot_backend(len: usize) -> Backend {
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if len >= crate::slot::MIN_SLOTS_AVX512 && pulp::x86::V4::try_new().is_some() {
-            return Backend::Avx512;
-        }
-        if len >= crate::slot::MIN_SLOTS_SIMD && pulp::x86::V3::try_new().is_some() {
-            return Backend::Avx2Fma;
-        }
-    }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if len >= crate::slot::MIN_SLOTS_SIMD {
-            return Backend::Neon;
-        }
+    #[cfg(feature = "simd")]
+    if len >= crate::slot::MIN_SLOTS_SIMD {
+        return capabilities();
     }
     let _ = len;
     Backend::Portable
@@ -105,8 +119,9 @@ mod tests {
         assert_eq!(b, Backend::Neon);
         #[cfg(all(feature = "simd", target_arch = "x86_64"))]
         assert_ne!(b, Backend::Neon);
-        #[cfg(not(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+        #[cfg(not(feature = "simd"))]
         assert_eq!(b, Backend::Portable);
+        assert_eq!(b, capabilities());
     }
 
     #[test]

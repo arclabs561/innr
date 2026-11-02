@@ -2,15 +2,11 @@
 //!
 //! Mirrors the `f32` API in [`crate::dense`] for code paths that need higher
 //! precision (scientific computing, PageRank-style accumulation, statistical
-//! reductions). The reductions dispatch to SIMD at runtime (AVX-512 / AVX2 on
-//! x86_64, NEON on aarch64) with a 4-way-unrolled portable fallback; FMA makes
-//! the f64 paths at least as accurate as the scalar loop.
+//! reductions). With the `simd` feature the reductions dispatch to SIMD at
+//! runtime (AVX-512 / AVX2 on x86, NEON on aarch64, WASM SIMD128) with a
+//! 4-way-unrolled portable fallback.
 
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-const MIN_DIM_SIMD_F64: usize = 8;
+use crate::metric::{eval_unchecked, Cosine, Dot, L2Sq, L1};
 
 /// Dot product of two `f64` vectors: `Σ(a[i] * b[i])`.
 ///
@@ -28,30 +24,7 @@ const MIN_DIM_SIMD_F64: usize = 8;
 #[inline]
 #[must_use]
 pub fn dot_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len().min(b.len());
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::dot_f64_avx512(simd, a, b);
-            }
-        }
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::dot_f64_avx2(simd, a, b);
-            }
-        }
-    }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::dot_f64_neon(simd, a, b);
-            }
-        }
-    }
-    dot_f64_portable(a, b)
+    eval_unchecked::<f64, Dot>(a, b)
 }
 
 #[inline]
@@ -129,12 +102,18 @@ pub fn normalize_f64(v: &mut [f64]) -> f64 {
 #[inline]
 #[must_use]
 pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
-    let na = norm_f64(a);
-    let nb = norm_f64(b);
+    eval_unchecked::<f64, Cosine>(a, b)
+}
+
+/// Cosine from its three sums, `0.0` when either norm is at most
+/// `f64::EPSILON`.
+#[inline]
+pub(crate) fn finish_cosine_f64(ab: f64, aa: f64, bb: f64) -> f64 {
+    let (na, nb) = (aa.sqrt(), bb.sqrt());
     if na <= f64::EPSILON || nb <= f64::EPSILON {
         return 0.0;
     }
-    dot_f64(a, b) / (na * nb)
+    ab / (na * nb)
 }
 
 /// Squared Euclidean distance: `Σ((a[i] - b[i])²)`.
@@ -144,30 +123,7 @@ pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
 #[inline]
 #[must_use]
 pub fn l2_distance_squared_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len().min(b.len());
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::l2_squared_f64_avx512(simd, a, b);
-            }
-        }
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::l2_squared_f64_avx2(simd, a, b);
-            }
-        }
-    }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::l2_squared_f64_neon(simd, a, b);
-            }
-        }
-    }
-    l2_distance_squared_f64_portable(a, b)
+    eval_unchecked::<f64, L2Sq>(a, b)
 }
 
 #[inline]
@@ -223,30 +179,7 @@ pub fn l2_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 #[inline]
 #[must_use]
 pub fn l1_distance_f64(a: &[f64], b: &[f64]) -> f64 {
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len().min(b.len());
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::l1_f64_avx512(simd, a, b);
-            }
-        }
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::l1_f64_avx2(simd, a, b);
-            }
-        }
-    }
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD_F64 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::l1_f64_neon(simd, a, b);
-            }
-        }
-    }
-    l1_distance_f64_portable(a, b)
+    eval_unchecked::<f64, L1>(a, b)
 }
 
 #[inline]

@@ -25,10 +25,6 @@
 
 use crate::NORM_EPSILON_SQ;
 
-// MIN_DIM_SIMD is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::MIN_DIM_SIMD;
-
 /// Fast scalar inverse square root using the classic Quake III bit-hack.
 ///
 /// One Newton-Raphson iteration from the 0x5f375a86 seed: maximum relative
@@ -128,323 +124,12 @@ pub fn fast_cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SIMD implementations
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-#[allow(clippy::incompatible_msrv)]
-pub(crate) mod x86_64 {
-    //! AVX2/AVX-512 fast cosine using rsqrt instructions.
-
-    use crate::arch::x86_64::{ld256_f32, ld512_f32};
-    use pulp::x86::{V3, V4};
-    use std::arch::x86_64::{__m256, __m512};
-
-    /// AVX-512 fast cosine with hardware rsqrt + Newton-Raphson.
-    ///
-    /// Uses SSE `rsqrtps` for ~12-bit initial estimate, then one NR iteration.
-    /// We use `_mm_rsqrt_ps` (SSE) rather than `_mm512_rsqrt14_ps` to avoid
-    /// requiring AVX-512VL; SSE is always available when AVX-512F is present.
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    #[inline]
-    pub fn fast_cosine_avx512(simd: V4, a: &[f32], b: &[f32]) -> f32 {
-        simd.vectorize(|| fast_cosine_avx512_in(simd, a, b))
-    }
-
-    #[inline(always)]
-    fn fast_cosine_avx512_in(simd: V4, a: &[f32], b: &[f32]) -> f32 {
-        let n = a.len().min(b.len());
-        if n == 0 {
-            return 0.0;
-        }
-
-        let (a16, a_tail) = a[..n].as_chunks::<16>();
-        let (b16, b_tail) = b[..n].as_chunks::<16>();
-
-        let mut ab_sum: __m512 = simd.avx512f._mm512_setzero_ps();
-        let mut aa_sum: __m512 = simd.avx512f._mm512_setzero_ps();
-        let mut bb_sum: __m512 = simd.avx512f._mm512_setzero_ps();
-
-        // Process 16 floats at a time
-        for (qa, qb) in a16.iter().zip(b16) {
-            let va = ld512_f32(qa);
-            let vb = ld512_f32(qb);
-
-            ab_sum = simd.avx512f._mm512_fmadd_ps(va, vb, ab_sum);
-            aa_sum = simd.avx512f._mm512_fmadd_ps(va, va, aa_sum);
-            bb_sum = simd.avx512f._mm512_fmadd_ps(vb, vb, bb_sum);
-        }
-
-        // Reduce to scalars
-        let mut ab = simd.avx512f._mm512_reduce_add_ps(ab_sum);
-        let mut aa = simd.avx512f._mm512_reduce_add_ps(aa_sum);
-        let mut bb = simd.avx512f._mm512_reduce_add_ps(bb_sum);
-
-        // Handle tail
-        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
-            ab += ai * bi;
-            aa += ai * ai;
-            bb += bi * bi;
-        }
-
-        // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
-        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
-            // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
-            let vals = simd.sse._mm_set_ps(1.0, 1.0, bb, aa);
-            // Initial ~12-bit rsqrt estimate
-            let est = simd.sse._mm_rsqrt_ps(vals);
-            // One NR iteration: y = y * (1.5 - 0.5 * x * y * y)
-            let half = simd.sse._mm_set1_ps(0.5);
-            let three_half = simd.sse._mm_set1_ps(1.5);
-            let half_x = simd.sse._mm_mul_ps(half, vals);
-            let est_sq = simd.sse._mm_mul_ps(est, est);
-            let refined = simd.sse._mm_mul_ps(
-                est,
-                simd.sse
-                    ._mm_sub_ps(three_half, simd.sse._mm_mul_ps(half_x, est_sq)),
-            );
-            // Extract lane 0 (rsqrt_aa) and lane 1 (rsqrt_bb)
-            let rsqrt_aa = simd.sse._mm_cvtss_f32(refined);
-            let rsqrt_bb = simd
-                .sse
-                ._mm_cvtss_f32(simd.sse._mm_shuffle_ps::<0x55>(refined, refined));
-            ab * rsqrt_aa * rsqrt_bb
-        } else {
-            0.0
-        }
-    }
-
-    /// AVX2 fast cosine with hardware rsqrt + Newton-Raphson.
-    ///
-    /// Uses SSE `_mm_rsqrt_ps` for ~12-bit initial estimate, then one
-    /// Newton-Raphson iteration for ~24 bits of accuracy.
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    #[inline]
-    pub fn fast_cosine_avx2(simd: V3, a: &[f32], b: &[f32]) -> f32 {
-        simd.vectorize(|| fast_cosine_avx2_in(simd, a, b))
-    }
-
-    #[inline(always)]
-    fn fast_cosine_avx2_in(simd: V3, a: &[f32], b: &[f32]) -> f32 {
-        let n = a.len().min(b.len());
-        if n == 0 {
-            return 0.0;
-        }
-
-        let (a8, a_tail) = a[..n].as_chunks::<8>();
-        let (b8, b_tail) = b[..n].as_chunks::<8>();
-
-        let mut ab_sum: __m256 = simd.avx._mm256_setzero_ps();
-        let mut aa_sum: __m256 = simd.avx._mm256_setzero_ps();
-        let mut bb_sum: __m256 = simd.avx._mm256_setzero_ps();
-
-        // Process 8 floats at a time
-        for (qa, qb) in a8.iter().zip(b8) {
-            let va = ld256_f32(qa);
-            let vb = ld256_f32(qb);
-
-            ab_sum = simd.fma._mm256_fmadd_ps(va, vb, ab_sum);
-            aa_sum = simd.fma._mm256_fmadd_ps(va, va, aa_sum);
-            bb_sum = simd.fma._mm256_fmadd_ps(vb, vb, bb_sum);
-        }
-
-        // Horizontal reduction helper
-        #[inline(always)]
-        fn hsum256(simd: V3, v: __m256) -> f32 {
-            let hi = simd.avx._mm256_extractf128_ps::<1>(v);
-            let lo = simd.avx._mm256_castps256_ps128(v);
-            let sum128 = simd.sse._mm_add_ps(lo, hi);
-            let sum64 = simd
-                .sse
-                ._mm_add_ps(sum128, simd.sse._mm_movehl_ps(sum128, sum128));
-            let sum32 = simd
-                .sse
-                ._mm_add_ss(sum64, simd.sse._mm_shuffle_ps::<1>(sum64, sum64));
-            simd.sse._mm_cvtss_f32(sum32)
-        }
-
-        let mut ab = hsum256(simd, ab_sum);
-        let mut aa = hsum256(simd, aa_sum);
-        let mut bb = hsum256(simd, bb_sum);
-
-        // Handle tail
-        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
-            ab += ai * bi;
-            aa += ai * ai;
-            bb += bi * bi;
-        }
-
-        // Hardware rsqrt via SSE _mm_rsqrt_ps + one Newton-Raphson iteration
-        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
-            // Pack [aa, bb, 1.0, 1.0] into a 128-bit SSE register
-            let vals = simd.sse._mm_set_ps(1.0, 1.0, bb, aa);
-            // Initial ~12-bit rsqrt estimate
-            let est = simd.sse._mm_rsqrt_ps(vals);
-            // One NR iteration: y = y * (1.5 - 0.5 * x * y * y)
-            let half = simd.sse._mm_set1_ps(0.5);
-            let three_half = simd.sse._mm_set1_ps(1.5);
-            let half_x = simd.sse._mm_mul_ps(half, vals);
-            let est_sq = simd.sse._mm_mul_ps(est, est);
-            let refined = simd.sse._mm_mul_ps(
-                est,
-                simd.sse
-                    ._mm_sub_ps(three_half, simd.sse._mm_mul_ps(half_x, est_sq)),
-            );
-            // Extract lane 0 (rsqrt_aa) and lane 1 (rsqrt_bb)
-            let rsqrt_aa = simd.sse._mm_cvtss_f32(refined);
-            let rsqrt_bb = simd
-                .sse
-                ._mm_cvtss_f32(simd.sse._mm_shuffle_ps::<0x55>(refined, refined));
-            ab * rsqrt_aa * rsqrt_bb
-        } else {
-            0.0
-        }
-    }
-}
-
-#[cfg(all(feature = "simd", target_arch = "aarch64"))]
-pub(crate) mod aarch64 {
-    //! NEON fast cosine using vrsqrte + Newton-Raphson.
-
-    use crate::arch::aarch64::ld_f32;
-    use pulp::aarch64::Neon;
-    use std::arch::aarch64::{float32x2_t, float32x4_t};
-
-    /// NEON fast cosine with 4-way unrolled accumulation and hardware rsqrt.
-    ///
-    /// Uses `vrsqrteq_f32` + two `vrsqrtsq_f32` Newton-Raphson iterations for
-    /// the final normalization, avoiding scalar/SIMD transitions entirely.
-    #[inline]
-    pub fn fast_cosine_neon(simd: Neon, a: &[f32], b: &[f32]) -> f32 {
-        simd.vectorize(|| fast_cosine_neon_in(simd, a, b))
-    }
-
-    #[inline(always)]
-    fn fast_cosine_neon_in(simd: Neon, a: &[f32], b: &[f32]) -> f32 {
-        let n = a.len().min(b.len());
-        if n == 0 {
-            return 0.0;
-        }
-
-        let (a4, a_tail) = a[..n].as_chunks::<4>();
-        let (b4, b_tail) = b[..n].as_chunks::<4>();
-        let (a16, a_rem) = a4.as_chunks::<4>();
-        let (b16, b_rem) = b4.as_chunks::<4>();
-
-        // 4-way unrolled: process 16 floats per iteration
-        let mut ab0: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut ab1: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut ab2: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut ab3: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut aa0: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut aa1: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut aa2: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut aa3: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut bb0: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut bb1: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut bb2: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut bb3: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-
-        for ([a0, a1, a2, a3], [b0, b1, b2, b3]) in a16.iter().zip(b16) {
-            let (va0, vb0) = (ld_f32(a0), ld_f32(b0));
-            let (va1, vb1) = (ld_f32(a1), ld_f32(b1));
-            let (va2, vb2) = (ld_f32(a2), ld_f32(b2));
-            let (va3, vb3) = (ld_f32(a3), ld_f32(b3));
-
-            ab0 = simd.neon.vfmaq_f32(ab0, va0, vb0);
-            ab1 = simd.neon.vfmaq_f32(ab1, va1, vb1);
-            ab2 = simd.neon.vfmaq_f32(ab2, va2, vb2);
-            ab3 = simd.neon.vfmaq_f32(ab3, va3, vb3);
-
-            aa0 = simd.neon.vfmaq_f32(aa0, va0, va0);
-            aa1 = simd.neon.vfmaq_f32(aa1, va1, va1);
-            aa2 = simd.neon.vfmaq_f32(aa2, va2, va2);
-            aa3 = simd.neon.vfmaq_f32(aa3, va3, va3);
-
-            bb0 = simd.neon.vfmaq_f32(bb0, vb0, vb0);
-            bb1 = simd.neon.vfmaq_f32(bb1, vb1, vb1);
-            bb2 = simd.neon.vfmaq_f32(bb2, vb2, vb2);
-            bb3 = simd.neon.vfmaq_f32(bb3, vb3, vb3);
-        }
-
-        // Combine the 4 accumulators
-        let ab_sum = simd
-            .neon
-            .vaddq_f32(simd.neon.vaddq_f32(ab0, ab1), simd.neon.vaddq_f32(ab2, ab3));
-        let aa_sum = simd
-            .neon
-            .vaddq_f32(simd.neon.vaddq_f32(aa0, aa1), simd.neon.vaddq_f32(aa2, aa3));
-        let bb_sum = simd
-            .neon
-            .vaddq_f32(simd.neon.vaddq_f32(bb0, bb1), simd.neon.vaddq_f32(bb2, bb3));
-
-        let mut ab = simd.neon.vaddvq_f32(ab_sum);
-        let mut aa = simd.neon.vaddvq_f32(aa_sum);
-        let mut bb = simd.neon.vaddvq_f32(bb_sum);
-
-        // Handle remaining 4-float chunks
-        let mut ab_tail: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut aa_tail: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-        let mut bb_tail: float32x4_t = simd.neon.vdupq_n_f32(0.0);
-
-        for (qa, qb) in a_rem.iter().zip(b_rem) {
-            let (va, vb) = (ld_f32(qa), ld_f32(qb));
-            ab_tail = simd.neon.vfmaq_f32(ab_tail, va, vb);
-            aa_tail = simd.neon.vfmaq_f32(aa_tail, va, va);
-            bb_tail = simd.neon.vfmaq_f32(bb_tail, vb, vb);
-        }
-
-        ab += simd.neon.vaddvq_f32(ab_tail);
-        aa += simd.neon.vaddvq_f32(aa_tail);
-        bb += simd.neon.vaddvq_f32(bb_tail);
-
-        // Scalar tail
-        for (&ai, &bi) in a_tail.iter().zip(b_tail) {
-            ab += ai * bi;
-            aa += ai * ai;
-            bb += bi * bi;
-        }
-
-        if aa > super::NORM_EPSILON_SQ && bb > super::NORM_EPSILON_SQ {
-            // NEON hardware rsqrt: vrsqrte + two Newton-Raphson iterations via vrsqrts.
-            // Pack aa and bb into a float32x2_t, compute rsqrt in-register,
-            // then extract and multiply. This avoids scalar/SIMD transitions.
-            let norms: float32x2_t = simd.neon.vdup_n_f32(0.0);
-            // Load aa into lane 0, bb into lane 1
-            let norms = simd.neon.vset_lane_f32::<0>(aa, norms);
-            let norms = simd.neon.vset_lane_f32::<1>(bb, norms);
-
-            // Initial estimate (~8-12 bits)
-            let mut est: float32x2_t = simd.neon.vrsqrte_f32(norms);
-
-            // Newton-Raphson iteration 1: est = est * vrsqrts(norms, est * est)
-            est = simd.neon.vmul_f32(
-                est,
-                simd.neon.vrsqrts_f32(norms, simd.neon.vmul_f32(est, est)),
-            );
-            // Newton-Raphson iteration 2
-            est = simd.neon.vmul_f32(
-                est,
-                simd.neon.vrsqrts_f32(norms, simd.neon.vmul_f32(est, est)),
-            );
-
-            let rsqrt_aa = simd.neon.vget_lane_f32::<0>(est);
-            let rsqrt_bb = simd.neon.vget_lane_f32::<1>(est);
-
-            ab * rsqrt_aa * rsqrt_bb
-        } else {
-            0.0
-        }
-    }
-}
-
 /// Dispatch to the fastest available `fast_cosine` implementation.
 ///
 /// Selects AVX-512, AVX2+FMA, NEON, or portable based on runtime detection.
 ///
-/// The SIMD paths refine a hardware rsqrt estimate to near full f32 precision.
-/// Inputs shorter than 16 elements, or builds without SIMD, use the portable
+/// The SIMD paths run the same fused kernel as [`crate::cosine`] and return
+/// the exact cosine (one `sqrt` and one divide per call). Inputs shorter than 16 elements, or builds without SIMD, use the portable
 /// [`fast_cosine`] and carry its error of up to about 3.5e-3 relative.
 ///
 /// # Examples
@@ -469,30 +154,18 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
         a.len(),
         b.len()
     );
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= 64 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return x86_64::fast_cosine_avx512(simd, a, b);
-            }
-        }
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return x86_64::fast_cosine_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return aarch64::fast_cosine_neon(simd, a, b);
-            }
-        }
+    // The rsqrt estimate only replaces the final sqrt and divide, which run
+    // once per call; the SIMD path computes them exactly instead.
+    #[cfg(feature = "simd")]
+    if a.len() >= crate::MIN_DIM_SIMD {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => {
+                let (ab, aa, bb) = crate::arch::kernels::cosine_parts_f32(s, a, b);
+                crate::dense::finish_cosine(ab, aa, bb)
+            },
+            _ => fast_cosine(a, b),
+        );
     }
 
     fast_cosine(a, b)

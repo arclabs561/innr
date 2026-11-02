@@ -18,18 +18,28 @@
 //!
 //! # SIMD Dispatch
 //!
-//! All functions automatically dispatch to the fastest available instruction set:
+//! The default build has no dependencies and no `unsafe`: its portable
+//! kernels keep several independent accumulators so LLVM auto-vectorizes them
+//! for the compile target (NEON on aarch64, SSE2 on baseline x86_64).
 //!
-//! | Architecture | Instructions | Detection |
-//! |--------------|--------------|-----------|
-//! | x86_64 | x86-64-v4 (Pulp V4, including AVX-512) | Runtime |
-//! | x86_64 | x86-64-v3 (Pulp V3, including AVX2 + FMA) | Runtime |
+//! The `simd` feature adds runtime dispatch through
+//! [`fearless_simd`](https://docs.rs/fearless_simd). The level is detected
+//! once per call (per call block for MaxSim) and reported by
+//! [`capabilities`]:
+//!
+//! | Architecture | Level | Detection |
+//! |--------------|-------|-----------|
+//! | x86 / x86_64 | AVX-512 (Ice Lake-class) | Runtime |
+//! | x86 / x86_64 | AVX2 + FMA (x86-64-v3) | Runtime |
 //! | aarch64 | NEON | Always available |
+//! | wasm32 | SIMD128 (with `+simd128`) | Compile time |
 //! | Other | Portable | LLVM auto-vectorizes |
 //!
 //! Short vectors use portable code (SIMD overhead not worthwhile); the
-//! threshold is per module: 16 dimensions for dense f32 ops, 32 for the
-//! quantized `u8` ops, 8 for integer-slot ops.
+//! threshold is per module: 16 dimensions for dense f32 ops, 8 for dense f64
+//! ops, 32 for the quantized `u8` ops, 8 for integer-slot ops.
+//!
+//! Generic code can take a metric as a type parameter; see [`metric`].
 //!
 //! # Contracts
 //!
@@ -93,7 +103,9 @@
 mod arch;
 
 #[cfg(test)]
-mod bit_pins;
+mod accuracy;
+
+pub mod metric;
 
 /// Binary (1-bit) quantization: encode, Hamming distance, dot product, Jaccard.
 pub mod backend;
@@ -174,10 +186,11 @@ pub use slot::{
 
 pub use topk::TopK;
 
+pub use backend::capabilities;
+
 /// Minimum vector dimension for SIMD to be worthwhile.
 ///
 /// Below this, function call overhead outweighs SIMD benefits.
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub(crate) const MIN_DIM_SIMD: usize = 16;
 
 /// Threshold for treating a norm as "effectively zero".

@@ -4,26 +4,36 @@
 
 ### Changed
 
-- Require Rust 1.94 for the development Pulp revision's x86 intrinsics, and
-  document the full Pulp V3/V4 CPU requirements. The extended property CI job
-  now selects its named integration targets instead of an empty name filter;
-  explicit test-local case limits remain in effect.
-- Pinned the development SIMD dependency to upstream Pulp commit
-  `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, using `pastey`, without an
-  advisory exception. Registry publication remains gated on a published
-  replacement and release validation; dependency internals still use unsafe Rust.
-- Replaced local unsafe SIMD code with safe `pulp` kernels and forbade unsafe
-  code in innr. The new default `simd` feature depends on `pulp`; use
-  `default-features = false` for dependency-free portable kernels.
-- Changed x86 dispatch to require `pulp`'s V3 (x86-64-v3) and V4 (x86-64-v4)
-  feature sets, which require more CPU features than the previous AVX2/FMA and
-  AVX-512 checks. CPUs without these tokens use a lower supported backend.
-- Replaced the AVX-512 Hamming VPOPCNTDQ kernel with an AVX-512BW nibble lookup
-  kernel. Dispatch length thresholds were retained.
+- The SIMD backend is now [`fearless_simd`](https://crates.io/crates/fearless_simd)
+  1.2, behind the `simd` feature. innr's local `std::arch` unsafe kernels are
+  replaced by one set of safe kernels generic over `fearless_simd::Simd`,
+  dispatched at runtime to AVX-512 (Ice Lake-class), AVX2+FMA (x86-64-v3),
+  NEON or WASM SIMD128. innr now forbids unsafe code. x86 CPUs with only the
+  older AVX-512 subset (Skylake-X) run the AVX2+FMA kernels; x86 CPUs without
+  x86-64-v3 run the portable kernels.
+- Default features are now empty: the default build has no dependencies and
+  runs the portable kernels, as the published 0.6.3 does without SIMD. Enable
+  `features = ["simd"]` for runtime-dispatched kernels.
+- The SIMD kernels sum in a different order than in 0.6.3 (native-width
+  vectors, four accumulators, fused multiply-add), so f32 results can differ
+  in the last bits (up to about 2e-6 relative on the test fixtures). Accuracy tests
+  now bound every reduction against a higher-precision reference instead of
+  pinning exact bits.
+- `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
+  SIMD-sized inputs instead of a refined hardware rsqrt estimate.
+- MSRV is Rust 1.89, the minimum for `fearless_simd` 1.2.
+- The extended property CI job now selects its named integration targets
+  instead of an empty name filter; explicit test-local case limits remain in
+  effect.
 
-- Preserve the public `fast_math` module and root `fast_cosine`,
-  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports with
-  safe implementations, including the existing length-mismatch panic contracts.
+### Added
+
+- `innr::capabilities()` reports the SIMD level in use;
+  `backend::Backend::WasmSimd128` names the WASM level.
+- `innr::metric`: metrics as zero-sized types (`Dot`, `Cosine`, `L2Sq`, `L1`,
+  `Hamming`) implementing a sealed `Metric<T>` trait with a `DIRECTION`
+  (similarity or distance), and a sealed `Element` trait carrying each element
+  type's accumulator. The free functions are thin wrappers over these.
 
 ### Fixed
 

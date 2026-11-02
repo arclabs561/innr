@@ -1,0 +1,14 @@
+[package]
+name = "innr-bench-support"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Shared data generators and unsafe consumer fallbacks for innr's consumer-shape benchmarks"
+license = "MIT OR Apache-2.0"
+
+# innr forbids unsafe code in every target, including benches. Consumer
+# fallbacks that use raw intrinsics are copied here instead, verbatim.
+
+[dependencies]
+criterion = { version = "0.5", default-features = false }
+rand = "0.9"

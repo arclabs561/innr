@@ -24,9 +24,10 @@ include = [
 [workspace]
 
 [package.metadata.docs.rs]
-# Build with every feature so sparse_ext and the anndists impls are
-# visible on docs.rs (they are README-advertised).
-all-features = true
+# Build with every library feature so sparse_ext, the anndists impls and the
+# SIMD backend are visible on docs.rs (they are README-advertised).
+# bench-numkong is benchmark-only and is left out.
+features = ["simd", "sparse", "anndists"]
 
 [features]
 default = []

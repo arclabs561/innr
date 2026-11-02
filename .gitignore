@@ -4,3 +4,4 @@ Cargo.lock
 flamegraph_*.svg
 /proptest-regressions/
 /semver-checks/
+/benches/numkong/target

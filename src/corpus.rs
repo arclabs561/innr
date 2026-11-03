@@ -482,6 +482,45 @@ mod tests {
         assert!(empty.scores::<Dot>(&data[0]).is_empty());
     }
 
+    /// NaN rows rank after every finite row whatever the NaN's sign bit; x86
+    /// arithmetic produces negative NaN, which `total_cmp` would sort first.
+    fn check_nan_last<M: Metric<f32, Output = f32>>() {
+        for dim in [4, 32] {
+            let mut data = rows(10, dim, 11);
+            data[2][1] = f32::NAN;
+            data[7][0] = -f32::NAN;
+            let corpus = pack(&data, dim);
+            let q = &rows(1, dim, 5)[0];
+            let all = corpus.top_k::<M>(q, 10);
+            assert_eq!(all.len(), 10);
+            assert!(all[..8].iter().all(|h| h.score.is_finite()), "dim={dim}");
+            assert!(all[8..].iter().all(|h| h.score.is_nan()), "dim={dim}");
+            let few = corpus.top_k::<M>(q, 3);
+            assert!(few.iter().all(|h| h.score.is_finite()), "dim={dim}");
+        }
+    }
+
+    #[test]
+    fn top_k_ranks_nan_last() {
+        check_nan_last::<Dot>();
+        check_nan_last::<L2Sq>();
+        check_nan_last::<L1>();
+    }
+
+    /// Cosine maps NaN input to 0.0 rather than NaN; the corpus scan must
+    /// keep that per-row contract.
+    #[test]
+    fn cosine_scores_nan_rows_as_per_row_metric() {
+        let mut data = rows(4, 32, 11);
+        data[1][3] = f32::NAN;
+        data[2][0] = -f32::NAN;
+        let q = &rows(1, 32, 5)[0];
+        let got = pack(&data, 32).scores::<Cosine>(q);
+        assert_eq!(got[1], Cosine::eval(q, &data[1]));
+        assert_eq!(got[2], Cosine::eval(q, &data[2]));
+        assert_eq!(got[1], 0.0);
+    }
+
     #[test]
     fn top_k_many_matches_top_k() {
         let data = rows(40, 32, 5);

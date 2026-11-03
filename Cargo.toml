@@ -54,7 +54,7 @@ fearless_simd = { version = "1.2", optional = true }
 # Tests run the SIMD kernels on fearless_simd's scalar `Fallback` level too,
 # which this feature makes constructible on every target.
 fearless_simd = { version = "1.2", features = ["force_support_fallback"] }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1.5"
 qntz = { version = "0.2.1", features = ["rabitq"] }
 rand = "0.9"

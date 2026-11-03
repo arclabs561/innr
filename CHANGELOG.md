@@ -11,9 +11,11 @@
   NEON or WASM SIMD128. innr now forbids unsafe code. x86 CPUs with only the
   older AVX-512 subset (Skylake-X) run the AVX2+FMA kernels; x86 CPUs without
   x86-64-v3 run the portable kernels.
-- Default features are now empty: the default build has no dependencies and
-  runs the portable kernels, as the published 0.6.3 does without SIMD. Enable
-  `features = ["simd"]` for runtime-dispatched kernels.
+- Breaking (performance): default features are now empty. 0.6.3 ran its own
+  SIMD kernels for every user; the 0.7 default build has no dependencies and
+  runs the portable kernels, which are 2x to 4x slower on x86 for cosine,
+  the mixed `f32`-by-`u8` dot and MaxSim (Ryzen 5600X). To keep SIMD, depend
+  on `innr = { version = "0.7", features = ["simd"] }`.
 - The SIMD kernels sum in a different order than in 0.6.3 (native-width
   vectors, eight accumulators, two for inputs shorter than eight vectors,
   fused multiply-add), so f32 results can differ

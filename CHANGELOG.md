@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+
+- SIMD `cosine` (and `Metric<f32>` for `Cosine`) keeps four accumulators per
+  sum instead of two from 64 `f32` (AVX2) or 32 (NEON) up. Two per sum left
+  the one-pass loop latency-bound on Apple silicon, slower than 0.6.3 at
+  large dimensions. Apple M3 Max, interleaved before and after: d768 84.7 to
+  54.3 ns, d1536 187 to 105 ns, d16 to d128 within 6%. Ryzen 5600X: within 4%
+  at every size.
+
 ## 0.7.0
 
 ### Changed

@@ -259,10 +259,11 @@ pub(crate) fn l1_f64<S: Simd>(simd: S, a: &[f64], b: &[f64]) -> f64 {
 
 /// Single pass over `a` and `b` returning `(Σ ab, Σ a², Σ b²)`.
 ///
-/// Two accumulators per quantity (six vectors) keep the FMA latency chain
-/// covered without spilling on 16-register x86 levels.
+/// [`cosine_parts_f32`] for inputs shorter than two of its blocks: two
+/// accumulators per quantity. Twelve accumulators cost more to set up and
+/// reduce than they save there (d16 on an Apple M3 Max: 2.9 vs 3.3 ns).
 #[inline(always)]
-pub(crate) fn cosine_parts_f32<S: Simd>(simd: S, a: &[f32], b: &[f32]) -> (f32, f32, f32) {
+fn cosine_parts_short_f32<S: Simd>(simd: S, a: &[f32], b: &[f32]) -> (f32, f32, f32) {
     let n = a.len().min(b.len());
     let (a, b) = (&a[..n], &b[..n]);
     let l = S::f32s::LEN;
@@ -297,6 +298,60 @@ pub(crate) fn cosine_parts_f32<S: Simd>(simd: S, a: &[f32], b: &[f32]) -> (f32, 
     let mut ab = (ab0 + ab1).reduce_sum();
     let mut aa = (aa0 + aa1).reduce_sum();
     let mut bb = (bb0 + bb1).reduce_sum();
+    for (&x, &y) in ra.remainder().iter().zip(rb.remainder()) {
+        ab += x * y;
+        aa += x * x;
+        bb += y * y;
+    }
+    (ab, aa, bb)
+}
+
+/// Four accumulators per quantity (twelve vectors). Two per quantity left the
+/// one-pass loop latency-bound: on an Apple M3 Max it ran at 2.2 dot
+/// products' cost at d768, slower than innr 0.6's kernel. Twelve accumulators
+/// plus two loaded vectors still fit AVX2's sixteen registers.
+#[inline(always)]
+pub(crate) fn cosine_parts_f32<S: Simd>(simd: S, a: &[f32], b: &[f32]) -> (f32, f32, f32) {
+    const Q: usize = 4;
+    let n = a.len().min(b.len());
+    let (a, b) = (&a[..n], &b[..n]);
+    let l = S::f32s::LEN;
+    if n < 2 * Q * l {
+        return cosine_parts_short_f32(simd, a, b);
+    }
+    let z = S::f32s::splat(simd, 0.0);
+    let (mut ab, mut aa, mut bb) = ([z; Q], [z; Q], [z; Q]);
+
+    let mut ca = a.chunks_exact(Q * l);
+    let mut cb = b.chunks_exact(Q * l);
+    for (x, y) in (&mut ca).zip(&mut cb) {
+        for k in 0..Q {
+            let r = k * l..(k + 1) * l;
+            let xk = S::f32s::from_slice(simd, &x[r.clone()]);
+            let yk = S::f32s::from_slice(simd, &y[r]);
+            ab[k] = xk.mul_add(yk, ab[k]);
+            aa[k] = xk.mul_add(xk, aa[k]);
+            bb[k] = yk.mul_add(yk, bb[k]);
+        }
+    }
+
+    // Leftover whole vectors (fewer than Q), one per accumulator; constant
+    // trip count so the indices stay constant and nothing spills.
+    let mut ra = ca.remainder().chunks_exact(l);
+    let mut rb = cb.remainder().chunks_exact(l);
+    for k in 0..Q - 1 {
+        let (Some(x), Some(y)) = (ra.next(), rb.next()) else {
+            break;
+        };
+        let xk = S::f32s::from_slice(simd, x);
+        let yk = S::f32s::from_slice(simd, y);
+        ab[k] = xk.mul_add(yk, ab[k]);
+        aa[k] = xk.mul_add(xk, aa[k]);
+        bb[k] = yk.mul_add(yk, bb[k]);
+    }
+
+    let sum = |v: [S::f32s; Q]| ((v[0] + v[1]) + (v[2] + v[3])).reduce_sum();
+    let (mut ab, mut aa, mut bb) = (sum(ab), sum(aa), sum(bb));
     for (&x, &y) in ra.remainder().iter().zip(rb.remainder()) {
         ab += x * y;
         aa += x * x;

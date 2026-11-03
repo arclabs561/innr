@@ -10,24 +10,24 @@ SIMD-accelerated vector similarity primitives.
 
 ```toml
 [dependencies]
-innr = "0.6.3"
+innr = "0.7"
 ```
 
-The published 0.6.3 dispatches with its own `std::arch` kernels, has no
-`simd` feature, and declares Rust 1.89. The rest of this README
-describes the unreleased source checkout, which differs as follows.
+The default `simd` feature dispatches at runtime to AVX-512, AVX2+FMA, NEON
+or WASM SIMD128 through [`fearless_simd`](https://crates.io/crates/fearless_simd),
+and falls back to portable kernels on other CPUs. Without it, innr has no
+dependencies and uses portable kernels written for the auto-vectorizer:
 
-The default build has no dependencies and uses portable kernels written for
-the auto-vectorizer. The optional `simd` feature adds runtime-dispatched
-kernels through [`fearless_simd`](https://crates.io/crates/fearless_simd).
+```toml
+innr = { version = "0.7", default-features = false }
+```
+
+The portable build is the better choice on CPUs with neither AVX2 nor NEON,
+where the `simd` build only adds a dispatch check (see
+[Performance](#performance) for six measured CPUs).
 innr forbids unsafe code in its own source and uses only `fearless_simd`'s
 safe API; `fearless_simd` confines its unsafe code to its own audited
 target-feature wrappers.
-
-```toml
-# Unreleased; from the source checkout until the next release.
-innr = { git = "https://github.com/arclabs561/innr", features = ["simd"] }
-```
 
 ```rust
 use innr::{dot, cosine, norm};
@@ -72,7 +72,7 @@ differ in floating-point rounding.
 **Metric trait**: `distance::Distance` with zero-sized metrics `DistCosine`, `DistDot`, `DistL2`, `DistL1`, `DistHamming`, `DistSlotU32` for parameterizing generic indexes. With the optional `anndists` feature these also implement `anndists::dist::Distance`, so they work directly as `hnsw_rs` distances:
 
 ```toml
-innr = { version = "0.6.3", features = ["anndists"] }
+innr = { version = "0.7", features = ["anndists"] }
 ```
 
 ```rust
@@ -102,14 +102,51 @@ slots). Requires Rust 1.89.
 
 ## Performance
 
-![Benchmark throughput](docs/bench_throughput.png)
+Criterion medians, single core, inputs in cache, from
+[`benches/results`](benches/results); the last column is the fastest
+fallback that a consumer of innr used before adopting it, on the same
+machine:
 
-*Cache-resident, single-core criterion runs of innr 0.1.5 on Apple Silicon
-(NEON), transcribed into `scripts/plot_benchmarks.py`. They predate the
-current kernels; run `cargo bench` for current numbers on your hardware.*
+| Operation | M3 Max `simd` | M3 Max portable | Ryzen 5600X `simd` | Ryzen 5600X portable | Consumer fallback (M3 / Ryzen) |
+|---|---:|---:|---:|---:|---|
+| dot, d=16 | 1.9 ns | 2.0 ns | 5.0 ns | 4.9 ns | rankops 1.9 ns / rankops 4.6 ns |
+| dot, d=768 | 39.5 ns | 41.2 ns | 35.0 ns | 48.6 ns | rankops 125.6 ns / rankops 73.5 ns |
+| cosine, d=768 | 83.6 ns | 109.3 ns | 51.5 ns | 128.5 ns | rankops 370.9 ns / rankops 185.3 ns |
+| squared L2, d=768 | 39.5 ns | 42.8 ns | 34.0 ns | 59.6 ns | vicinity 488.1 ns / clump 487.6 ns |
+| bit Hamming, 96 B | 2.8 ns | 3.0 ns | 7.0 ns | 7.3 ns | sketchir 3.3 ns / sketchir 36.7 ns |
+| matrix-vector, 768x768 | 31.6 µs | 32.2 µs | 25.6 µs | 38.2 µs | qntz 367.3 µs / qntz 366.6 µs |
+| scan, 100k x 128 | 1.82 ms | 2.03 ms | 3.61 ms | 3.67 ms | vicinity 5.56 ms / vicinity 8.52 ms |
+| MaxSim, 32x128 tokens, d=128 | 25.4 µs | 41.0 µs | 24.4 µs | 48.6 µs | rankops_flat 45.3 µs / rankops_flat 34.0 µs |
 
-Results depend on the CPU, compiler, vector length, and memory behavior.
-AVX-512 paths are executed and differential-tested in CI under Intel SDE.
+Machines: Apple M3 Max (macOS, rustc 1.99) and AMD Ryzen 5 5600X (Linux,
+rustc 1.91), innr 0.7.0 kernels, 2026-11-02. The M3 run's A/A noise floor
+(one kernel measured three times) was 5%; the Ryzen's was up to 32% at
+small sizes, so treat differences under about a third there as ties.
+
+What the `simd` feature buys depends on the CPU. Speedup of the `simd` build
+over the portable build (`default-features = false`), each pair timed in the
+same run with `benches/probe`:
+
+| CPU | dot d=16 | dot d=768 | cosine d=16 | cosine d=768 |
+|---|---:|---:|---:|---:|
+| Apple M3 Max (NEON) | 1.04x | 1.01x | 1.72x | 1.26x |
+| Raspberry Pi 3B+, Cortex-A53 (NEON) | 1.03x | 1.00x | 1.46x | 1.53x |
+| AMD Ryzen 5 5600X (AVX2) | 0.97x | 1.15x | 2.33x | 2.52x |
+| Intel i7-8559U (AVX2) | 0.90x | 1.35x | 2.11x | 2.99x |
+| Intel i3-8109U (AVX2) | 1.21x | 1.36x | 2.07x | 3.00x |
+| Intel Celeron J3455 (no AVX) | 0.76x | 0.98x | 0.95x | 0.99x |
+
+On ARM the portable build already compiles to NEON, so `simd` mostly helps
+cosine, MaxSim and the quantized dot. On x86 the portable build targets
+SSE2 and `simd` adds AVX2. On a CPU without AVX2 or NEON the `simd` build
+runs portable kernels behind a dispatch check, which cost up to 24% on the
+Celeron; use `default-features = false` there. The x86 d=768 rows predate
+an alignment change for long inputs in 0.7.0.
+
+Not claimed: AVX-512 speed (the kernels run and are tested in CI under
+Intel SDE, which does not measure speed), multi-threaded throughput, and
+data that does not fit in cache. Reproduce with
+`benches/report.sh OUT.md` on your machine.
 
 For maximum performance, build with native CPU features:
 

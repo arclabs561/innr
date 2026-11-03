@@ -18,12 +18,12 @@
 //!
 //! # SIMD Dispatch
 //!
-//! The default build has no dependencies and no `unsafe`: its portable
-//! kernels keep several independent accumulators so LLVM auto-vectorizes them
-//! for the compile target (NEON on aarch64, SSE2 on baseline x86_64).
-//!
-//! The `simd` feature adds runtime dispatch through
-//! [`fearless_simd`](https://docs.rs/fearless_simd). The level is detected
+//! The `simd` feature, on by default, adds runtime dispatch through
+//! [`fearless_simd`](https://docs.rs/fearless_simd). Without it
+//! (`default-features = false`) innr has no dependencies and runs portable
+//! kernels that keep several independent accumulators so LLVM auto-vectorizes
+//! them for the compile target (NEON on aarch64, SSE2 on baseline x86_64).
+//! innr has no `unsafe` code either way. With `simd`, the level is detected
 //! once per call (per call block for MaxSim) and reported by
 //! [`capabilities`]:
 //!

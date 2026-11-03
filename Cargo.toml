@@ -1,6 +1,6 @@
 [package]
 name = "innr"
-version = "0.6.3"
+version = "0.7.0"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 rust-version = "1.89"
@@ -30,10 +30,11 @@ include = [
 features = ["simd", "sparse", "anndists"]
 
 [features]
-default = []
+default = ["simd"]
 # Runtime-dispatched SIMD kernels (AVX-512, AVX2+FMA, NEON, WASM SIMD128) via
-# fearless_simd. Without it innr is dependency-free and uses the portable
-# kernels, which LLVM auto-vectorizes for the compile target.
+# fearless_simd, on by default as in 0.6. Without it (default-features =
+# false) innr is dependency-free and uses the portable kernels, which LLVM
+# auto-vectorizes for the compile target.
 simd = ["dep:fearless_simd"]
 sparse = []
 # Implements anndists::dist::Distance for the metric types in `distance`,

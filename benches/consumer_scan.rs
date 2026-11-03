@@ -22,6 +22,8 @@ use std::hint::black_box;
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, BenchmarkId, Criterion};
 use innr::batch::{batch_dot, VerticalBatch};
+use innr::corpus::Corpus;
+use innr::metric::Dot;
 use innr::TopK;
 use innr_bench_support::data;
 
@@ -189,8 +191,19 @@ fn vicinity(c: &mut Criterion) {
                 cosine_distance_normalized_innr,
             )
         });
-        let batch = VerticalBatch::from_flat(store, n, dim);
+        let packed = Corpus::from_flat(store, dim).unwrap();
         let q = &store[..dim];
+        run(&mut g, &format!("{INNR}_corpus"), &p, || {
+            // Dot ranks unit rows like the 1 - dot distance; skip the row itself.
+            packed
+                .top_k::<Dot>(black_box(q), MAX_DEGREE + 1)
+                .into_iter()
+                .filter(|h| h.index != query_row)
+                .take(MAX_DEGREE)
+                .map(|h| h.index as u32)
+                .collect::<Vec<_>>()
+        });
+        let batch = VerticalBatch::from_flat(store, n, dim);
         run(&mut g, &format!("{INNR}_vertical_batch"), &p, || {
             brute_force_row_vertical(black_box(&batch), black_box(q), query_row, MAX_DEGREE)
         });
@@ -252,6 +265,13 @@ fn topk_baselines(c: &mut Criterion) {
             run(&mut g, INNR, format!("{n}x{dim}"), || {
                 topk_exact(black_box(store), dim, black_box(&query), K)
             });
+            let packed = Corpus::from_flat(store, dim).unwrap();
+            run(
+                &mut g,
+                &format!("{INNR}_corpus"),
+                format!("{n}x{dim}"),
+                || packed.top_k::<Dot>(black_box(&query), K),
+            );
         }
         g.finish();
 
@@ -305,6 +325,13 @@ fn topk_baselines(c: &mut Criterion) {
                         .map(|query| topk_exact(black_box(store), dim, query, K))
                         .collect::<Vec<_>>()
                 });
+                let packed = Corpus::from_flat(store, dim).unwrap();
+                run(
+                    &mut g,
+                    &format!("{INNR}_corpus"),
+                    format!("Q{q}_{n}x{dim}"),
+                    || packed.top_k_many::<Dot, _>(black_box(qs).chunks_exact(dim), K),
+                );
             }
             g.finish();
         }

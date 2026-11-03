@@ -134,7 +134,7 @@ pub fn sparse_top_k(v: &[(u32, f32)], k: usize) -> Vec<(u32, f32)> {
         return v.to_vec();
     }
     let mut by_weight: Vec<_> = v.to_vec();
-    by_weight.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
+    by_weight.sort_by(|a, b| crate::topk::desc_nan_last(a.1.abs(), b.1.abs()));
     by_weight.truncate(k);
     by_weight.sort_by_key(|(dim, _)| *dim);
     by_weight

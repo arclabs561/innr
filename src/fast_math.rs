@@ -162,7 +162,7 @@ pub fn fast_cosine_dispatch(a: &[f32], b: &[f32]) -> f32 {
             crate::arch::isa(),
             s => {
                 let (ab, aa, bb) = crate::arch::kernels::cosine_parts_f32(s, a, b);
-                crate::dense::finish_cosine(ab, aa, bb)
+                crate::dense::finish_cosine(a, b, ab, aa, bb)
             },
             _ => fast_cosine(a, b),
         );

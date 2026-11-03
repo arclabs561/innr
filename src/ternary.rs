@@ -13,7 +13,7 @@
 //! - 00 = 0
 //! - 01 = +1
 //! - 10 = -1
-//! - 11 = reserved
+//! - 11 = reserved; [`crate::ternary::PackedTernary::new`] stores it as 0
 //!
 //! This packs 4 values per byte, 32 values per u64.
 //!
@@ -76,6 +76,13 @@ impl PackedTernary {
             if let Some(last) = data.last_mut() {
                 *last &= (1u64 << (rem * 2)) - 1;
             }
+        }
+        // Map the reserved pair 0b11 to 0b00. `get` already reads it as 0;
+        // without this, `ternary_hamming` counted it as nonzero while
+        // `ternary_dot` did not.
+        for w in &mut data {
+            let reserved = *w & (*w >> 1) & 0x5555_5555_5555_5555;
+            *w &= !(reserved | (reserved << 1));
         }
         Self { data, dimension }
     }
@@ -350,6 +357,20 @@ mod tests {
     }
 
     use super::*;
+
+    /// The reserved code 0b11 means 0 to every operation, not only `get`.
+    #[test]
+    fn reserved_code_is_zero_everywhere() {
+        let a = PackedTernary::new(vec![0b11], 1);
+        let b = PackedTernary::new(vec![0b01], 1);
+        assert_eq!(a.get(0), 0);
+        assert_eq!(a.data(), &[0]);
+        assert_eq!(ternary_dot(&a, &b), 0);
+        assert_eq!(ternary_hamming(&a, &b), 0);
+        // Valid codes next to a reserved one survive untouched.
+        let mixed = PackedTernary::new(vec![0b10_11_01], 3);
+        assert_eq!((mixed.get(0), mixed.get(1), mixed.get(2)), (1, 0, -1));
+    }
 
     #[test]
     fn test_encode_decode() {

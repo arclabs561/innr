@@ -247,7 +247,9 @@ mod tests {
         corpus
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| metric.eval(q, a).total_cmp(&metric.eval(q, b)))
+            .min_by(|(_, a), (_, b)| {
+                crate::topk::asc_nan_last(metric.eval(q, a), metric.eval(q, b))
+            })
             .map(|(i, _)| i)
             .unwrap()
     }

@@ -479,7 +479,7 @@ pub fn batch_knn_adaptive(
 
     // Find initial k-th best distance (threshold for pruning)
     let mut partial_indexed: Vec<(usize, f32)> = distances.iter().copied().enumerate().collect();
-    partial_indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    partial_indexed.sort_by(|a, b| crate::topk::asc_nan_last(a.1, b.1));
     let mut threshold = if k <= partial_indexed.len() {
         partial_indexed[k - 1].1 * (batch.dimension as f32 / warmup_dims as f32)
     } else {
@@ -540,7 +540,7 @@ pub fn batch_knn_adaptive(
             }
             if count >= k {
                 let slice = &mut buf[..count];
-                slice.select_nth_unstable_by(k - 1, |a, b| a.total_cmp(b));
+                slice.select_nth_unstable_by(k - 1, |a, b| crate::topk::asc_nan_last(*a, *b));
                 threshold = slice[k - 1];
             }
         }
@@ -554,7 +554,7 @@ pub fn batch_knn_adaptive(
         .map(|(i, _)| (i, distances[i]))
         .collect();
 
-    results.sort_by(|a, b| a.1.total_cmp(&b.1));
+    results.sort_by(|a, b| crate::topk::asc_nan_last(a.1, b.1));
     results.truncate(k);
 
     BatchKnnResult {
@@ -598,7 +598,7 @@ pub fn batch_dimension_variance(batch: &VerticalBatch) -> Vec<f32> {
 #[must_use]
 fn variance_order(variances: &[f32]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..variances.len()).collect();
-    order.sort_by(|&a, &b| variances[b].total_cmp(&variances[a]));
+    order.sort_by(|&a, &b| crate::topk::desc_nan_last(variances[a], variances[b]));
     order
 }
 
@@ -649,7 +649,7 @@ pub fn batch_knn_reordered(query: &[f32], batch: &VerticalBatch, k: usize) -> Ba
 
     // Find k smallest
     let mut indexed: Vec<(usize, f32)> = distances.into_iter().enumerate().collect();
-    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    indexed.sort_by(|a, b| crate::topk::asc_nan_last(a.1, b.1));
     indexed.truncate(k);
 
     BatchKnnResult {
@@ -754,7 +754,7 @@ pub fn batch_knn_dot(query: &[f32], batch: &VerticalBatch, k: usize) -> BatchKnn
 
     // Sort by descending dot product (highest first)
     let mut indexed: Vec<(usize, f32)> = dots.into_iter().enumerate().collect();
-    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+    indexed.sort_by(|a, b| crate::topk::desc_nan_last(a.1, b.1));
     indexed.truncate(k);
 
     BatchKnnResult {
@@ -790,7 +790,7 @@ pub fn batch_knn_cosine(query: &[f32], batch: &VerticalBatch, k: usize) -> Batch
 
     // Sort by descending similarity (highest first)
     let mut indexed: Vec<(usize, f32)> = cosines.into_iter().enumerate().collect();
-    indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
+    indexed.sort_by(|a, b| crate::topk::desc_nan_last(a.1, b.1));
     indexed.truncate(k);
 
     BatchKnnResult {
@@ -872,7 +872,7 @@ where
         .enumerate()
         .filter(|(i, _)| mask[*i])
         .collect();
-    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    indexed.sort_by(|a, b| crate::topk::asc_nan_last(a.1, b.1));
     indexed.truncate(k);
 
     BatchKnnResult {
@@ -884,6 +884,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A NaN score ranks last in every kNN entry point, for either NaN sign
+    /// (x86 arithmetic yields negative NaN).
+    #[test]
+    fn knn_ranks_nan_rows_last() {
+        for nan in [f32::NAN, f32::from_bits(0xFFC0_0000)] {
+            let rows = vec![vec![1.0f32, 0.0], vec![nan, 0.0], vec![0.5, 0.5]];
+            let batch = VerticalBatch::from_rows(&rows);
+            let q = [1.0f32, 0.0];
+            assert_eq!(batch_knn_dot(&q, &batch, 2).indices, vec![0, 2]);
+            assert_eq!(batch_knn_cosine(&q, &batch, 2).indices, vec![0, 2]);
+            assert_eq!(batch_knn(&q, &batch, 2).indices, vec![0, 2]);
+        }
+    }
 
     #[test]
     fn test_vertical_batch_creation() {

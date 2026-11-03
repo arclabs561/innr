@@ -193,15 +193,40 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 #[must_use]
 pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
     let (ab, aa, bb) = crate::portable::cosine_parts_f32(a, b);
-    finish_cosine(ab, aa, bb)
+    finish_cosine(a, b, ab, aa, bb)
 }
 
 /// Cosine from its three sums, `0.0` when either squared norm is effectively
 /// zero (this also absorbs NaN inputs).
 #[inline]
-pub(crate) fn finish_cosine(ab: f32, aa: f32, bb: f32) -> f32 {
+pub(crate) fn finish_cosine(a: &[f32], b: &[f32], ab: f32, aa: f32, bb: f32) -> f32 {
+    if !(ab.is_finite() && aa.is_finite() && bb.is_finite()) {
+        return cosine_wide(a, b);
+    }
     if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
         ab / (aa.sqrt() * bb.sqrt())
+    } else {
+        0.0
+    }
+}
+
+/// Cosine with `f64` sums, for inputs whose `f32` sums overflowed.
+///
+/// Entries above about 1.8e19 make `Σ a[i]²` exceed `f32::MAX` although the
+/// cosine itself is representable; the square of any `f32` fits in `f64`.
+/// NaN inputs still return `0.0`, as in the `f32` path.
+#[cold]
+fn cosine_wide(a: &[f32], b: &[f32]) -> f32 {
+    let (mut ab, mut aa, mut bb) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for (&x, &y) in a.iter().zip(b) {
+        let (x, y) = (f64::from(x), f64::from(y));
+        ab += x * y;
+        aa += x * x;
+        bb += y * y;
+    }
+    let eps = f64::from(crate::NORM_EPSILON_SQ);
+    if aa > eps && bb > eps {
+        (ab / (aa.sqrt() * bb.sqrt())) as f32
     } else {
         0.0
     }
@@ -438,6 +463,24 @@ pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Entries large enough that the f32 sums overflow must still give the
+    /// representable cosine, in both the SIMD and the portable lengths.
+    #[test]
+    fn cosine_of_large_finite_inputs() {
+        for n in [8usize, 32] {
+            let a = vec![1e20f32; n];
+            let c = crate::cosine(&a, &a);
+            assert!((c - 1.0).abs() < 1e-5, "n={n}: cosine = {c}");
+            let neg: Vec<f32> = a.iter().map(|x| -x).collect();
+            let c = crate::cosine(&a, &neg);
+            assert!((c + 1.0).abs() < 1e-5, "n={n}: opposite cosine = {c}");
+            assert!(
+                (cosine_portable(&a, &a) - 1.0).abs() < 1e-5,
+                "n={n}: portable"
+            );
+        }
+    }
 
     #[test]
     fn test_matryoshka_ranking_preservation() {

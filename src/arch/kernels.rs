@@ -21,6 +21,11 @@ use fearless_simd::{
 /// them); four measured slower than the portable kernels on NEON at 384+.
 const ACC: usize = 8;
 
+/// Main-loop blocks from which [`fold_float`] aligns its input on x86 (512
+/// `f32` on AVX2, 1024 on AVX-512). Gains were clear at d768 and mixed at
+/// d256; d512 was not measured.
+const PEEL_BLOCKS: usize = 8;
+
 /// Fold `step` over equal-length float slices with [`ACC`] vector
 /// accumulators.
 ///
@@ -45,6 +50,30 @@ where
     if n < ACC * l {
         return fold_float_short(simd, a, b, zero, step, tail);
     }
+    // On x86, from PEEL_BLOCKS main-loop blocks up, peel scalars until `b`
+    // starts on a vector-width boundary. Allocators only guarantee 16 bytes
+    // (glibc alternates 0 and 16 mod 32 for consecutive equal-sized
+    // allocations), and on AVX2 a buffer 16 bytes off a 32-byte boundary
+    // splits every other load across cache lines. Ryzen 5600X, d4096: both
+    // inputs 16 off 196 -> 127 ns; only one off about neutral (158 -> 162,
+    // 168 -> 161); both aligned 123 -> 126. Aligning `b` rather than `a`
+    // measured better when only one is off. NEON's 16-byte loads do not
+    // split, and the peel cost 7 to 11% at d128 to d256 on an Apple M3 Max,
+    // so other targets skip it. At d128 to d256 the scalar head cost about
+    // as much as the splits, hence the length gate.
+    let mut head_sum = zero;
+    let peel = cfg!(any(target_arch = "x86", target_arch = "x86_64"));
+    let (a, b) = if peel && n >= PEEL_BLOCKS * ACC * l {
+        let width = l * core::mem::size_of::<V::Element>();
+        let misalign = b.as_ptr() as usize % width;
+        let head = (width - misalign) % width / core::mem::size_of::<V::Element>();
+        for (&x, &y) in a[..head].iter().zip(&b[..head]) {
+            head_sum = tail(head_sum, x, y);
+        }
+        (&a[head..], &b[head..])
+    } else {
+        (a, b)
+    };
     let mut s = [V::splat(simd, zero); ACC];
 
     let mut ca = a.chunks_exact(ACC * l);
@@ -79,7 +108,7 @@ where
             s[k] += s[k + w];
         }
     }
-    let mut sum = s[0].reduce_sum();
+    let mut sum = s[0].reduce_sum() + head_sum;
     for (&x, &y) in ra.remainder().iter().zip(rb.remainder()) {
         sum = tail(sum, x, y);
     }
@@ -88,9 +117,8 @@ where
 
 /// [`fold_float`] for inputs shorter than one main-loop block (`ACC`
 /// vectors). With eight accumulators the result waits on three dependent
-/// vector adds even when only one or two were used; at d16 on AVX2 that
-/// epilogue dominated the call (5.9 ns against 5.0 for a two-accumulator
-/// kernel). Two accumulators end in a single add.
+/// vector adds even when only one or two were used; at d16 on AVX2 this path
+/// took the call from 5.9 to 5.2 ns. Two accumulators end in a single add.
 #[inline(always)]
 fn fold_float_short<S, V>(
     simd: S,
@@ -464,6 +492,40 @@ mod tests {
 
     fn close(got: f64, want: f64, scale: f64, n: usize) -> bool {
         (got - want).abs() <= (n as f64 + 4.0) * f64::from(f32::EPSILON) * scale.max(1.0)
+    }
+
+    /// The main-loop path peels scalars until `a` is vector-aligned. Slice
+    /// both inputs at every element offset up to 15 (64 bytes), separately
+    /// for `a` and `b`, so each peel length and unequal offsets are covered.
+    fn check_offsets<S: Simd>(s: S) {
+        let (ba, bb) = (f32s(1100, 3), f32s(1100, 9));
+        for n in [128usize, 129, 257, 1000, 1100 - 16] {
+            for oa in 0..16 {
+                for ob in [0usize, 1, 3, 4, 7] {
+                    let (a, b) = (&ba[oa..oa + n], &bb[ob..ob + n]);
+                    let pairs = || a.iter().zip(b).map(|(&x, &y)| (f64::from(x), f64::from(y)));
+                    let r_dot: f64 = pairs().map(|(x, y)| x * y).sum();
+                    let abs: f64 = pairs().map(|(x, y)| (x * y).abs()).sum();
+                    let got = s.vectorize(|| dot_f32(s, a, b));
+                    assert!(
+                        close(got.into(), r_dot, abs, n),
+                        "dot n={n} oa={oa} ob={ob}: {got} vs {r_dot}"
+                    );
+                    let r_l2: f64 = pairs().map(|(x, y)| (x - y).powi(2)).sum();
+                    let got = s.vectorize(|| l2_squared_f32(s, a, b));
+                    assert!(close(got.into(), r_l2, r_l2, n), "l2 n={n} oa={oa} ob={ob}");
+                    let r_l1: f64 = pairs().map(|(x, y)| (x - y).abs()).sum();
+                    let got = s.vectorize(|| l1_f32(s, a, b));
+                    assert!(close(got.into(), r_l1, r_l1, n), "l1 n={n} oa={oa} ob={ob}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn kernels_match_reference_at_every_offset() {
+        check_offsets(Fallback::new());
+        fearless_simd::dispatch!(Level::new(), s => check_offsets(s));
     }
 
     fn check_level<S: Simd>(s: S) {

@@ -27,12 +27,18 @@
   leftover in four lanes, and their final reduction differs between x86 and
   other targets, chosen from disassembly of what LLVM generates for each.
   Portable cosine is three folds instead of one fused pass. On a Ryzen 5600X
-  (baseline x86-64, no `simd`), portable dot at d128 went from about 20 to
-  13 ns and portable cosine at d768 from about 410 to 135 ns. Portable f32
+  (baseline x86-64, no `simd`; before and after are separate runs on an idle
+  host), portable dot at d128 went from about 20 to 13 ns and portable
+  cosine at d768 from about 410 to 135 ns. Portable f32
   results can differ from 0.6.3 in the last bits (up to about 6e-6 relative
   on the test fixtures); integer results are unchanged.
 - `slot_hamming_u64` counts mismatches with a plain loop that LLVM
   vectorizes on x86 (about 1.5x faster on a Ryzen 5600X; unchanged on NEON).
+- On x86, the SIMD float reductions align the second input to the vector
+  width before folding inputs of 512 `f32` (AVX2) or more. Allocators only
+  guarantee 16 bytes, and a buffer 16 bytes off a 32-byte boundary splits
+  half of AVX2's loads across cache lines: with both inputs off, `dot` at
+  d4096 on a Ryzen 5600X went from 196 to 127 ns (aligned: 123 to 126).
 - `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
   SIMD-sized inputs instead of a refined hardware rsqrt estimate.
 - Byte Hamming switches to SIMD at 128 bytes (was 32 on NEON/AVX2 and 64 on

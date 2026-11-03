@@ -262,7 +262,7 @@ impl Kernel<f32> for Cosine {
     #[inline(always)]
     fn simd<S: fearless_simd::Simd>(simd: S, a: &[f32], b: &[f32]) -> f32 {
         let (ab, aa, bb) = kernels::cosine_parts_f32(simd, a, b);
-        dense::finish_cosine(ab, aa, bb)
+        dense::finish_cosine(a, b, ab, aa, bb)
     }
 }
 impl Metric<f32> for Cosine {

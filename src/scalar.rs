@@ -115,7 +115,7 @@ impl QuantizationParams {
         }
 
         let mut sorted: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
-        sorted.sort_by(|a, b| a.total_cmp(b));
+        sorted.sort_by(|a, b| crate::topk::asc_nan_last(*a, *b));
 
         if sorted.is_empty() {
             return Self {
@@ -364,7 +364,7 @@ pub fn batch_knn_u8(
         .collect();
 
     // Sort descending by score (highest similarity first)
-    scores.sort_by(|a, b| b.1.total_cmp(&a.1));
+    scores.sort_by(|a, b| crate::topk::desc_nan_last(a.1, b.1));
     scores.truncate(k);
     scores
 }

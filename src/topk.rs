@@ -24,6 +24,35 @@
 //! - `threshold()`: O(1), no memory access beyond index 0.
 //! - `into_sorted()`: reverse of the internal buffer -- O(K).
 
+/// Ascending order with every NaN last, whatever its sign.
+///
+/// `f32::total_cmp` orders a NaN by its sign bit: positive NaN above every
+/// number, negative NaN below. x86 arithmetic produces negative NaN
+/// (`0.0 * f32::INFINITY` on SSE), so `total_cmp` alone can rank a NaN
+/// distance best. Use this for "smaller is better" rankings.
+#[inline]
+#[must_use]
+pub(crate) fn asc_nan_last(a: f32, b: f32) -> core::cmp::Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (false, false) => a.total_cmp(&b),
+        (true, true) => core::cmp::Ordering::Equal,
+        (true, false) => core::cmp::Ordering::Greater,
+        (false, true) => core::cmp::Ordering::Less,
+    }
+}
+
+/// Descending order with every NaN last, for "larger is better" rankings.
+#[inline]
+#[must_use]
+pub(crate) fn desc_nan_last(a: f32, b: f32) -> core::cmp::Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (false, false) => b.total_cmp(&a),
+        (true, true) => core::cmp::Ordering::Equal,
+        (true, false) => core::cmp::Ordering::Greater,
+        (false, true) => core::cmp::Ordering::Less,
+    }
+}
+
 /// Fixed-capacity min-tracker for top-K nearest neighbor search.
 ///
 /// Maintains the K smallest `(id, distance)` pairs seen so far.
@@ -94,6 +123,14 @@ impl TopK {
     /// branch-predictor-friendly when most candidates are above threshold.
     #[inline]
     pub fn insert(&mut self, id: u32, distance: f32) {
+        // Canonicalize to positive NaN, which total_cmp ranks worst. A
+        // negative NaN (x86's default for invalid operations) would
+        // otherwise rank best and evict a real neighbour.
+        let distance = if distance.is_nan() {
+            f32::NAN
+        } else {
+            distance
+        };
         if self.count < self.k {
             // Buffer not yet full: always insert.
             self.insert_sorted(id, distance);
@@ -208,6 +245,43 @@ mod tests {
     }
 
     use super::*;
+
+    /// x86's default NaN (from invalid operations) is negative; both signs
+    /// must rank worst, never evict a real neighbour.
+    #[test]
+    fn nan_of_either_sign_ranks_worst() {
+        for nan in [f32::NAN, f32::from_bits(0xFFC0_0000)] {
+            assert!(nan.is_nan());
+            let mut top = TopK::new(1);
+            top.insert(7, 0.5);
+            top.insert(9, nan);
+            assert_eq!(
+                top.into_sorted(),
+                vec![(7, 0.5)],
+                "nan bits {:#x}",
+                nan.to_bits()
+            );
+
+            let mut top = TopK::new(2);
+            top.insert(9, nan);
+            top.insert(7, 0.5);
+            let got = top.into_sorted();
+            assert_eq!(got[0], (7, 0.5));
+            assert!(got[1].1.is_nan());
+        }
+    }
+
+    #[test]
+    fn nan_last_comparators() {
+        let neg_nan = f32::from_bits(0xFFC0_0000);
+        let mut v = [2.0, neg_nan, 1.0, f32::NAN, 3.0];
+        v.sort_by(|a, b| asc_nan_last(*a, *b));
+        assert_eq!(&v[..3], &[1.0, 2.0, 3.0]);
+        assert!(v[3].is_nan() && v[4].is_nan());
+        v.sort_by(|a, b| desc_nan_last(*a, *b));
+        assert_eq!(&v[..3], &[3.0, 2.0, 1.0]);
+        assert!(v[3].is_nan() && v[4].is_nan());
+    }
 
     #[test]
     fn basic_top3() {

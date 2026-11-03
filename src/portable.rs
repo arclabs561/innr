@@ -39,52 +39,62 @@ macro_rules! fold_pairs {
     ($name:ident, $t:ty, $lanes:expr) => {
         /// `Σ term(a[i], b[i])` over the common prefix of `a` and `b`.
         ///
-        /// Wide blocks of `LANES` accumulate into a lane array, which is then
-        /// folded into four lanes; the leftover whole groups of four continue
-        /// in those four lanes, and fewer than four elements finish in a
-        /// scalar tail. One four-lane horizontal sum ends the reduction. A
-        /// separate wide tree sum plus a second sum for the leftover let LLVM
-        /// scalarize the tree on aarch64 (lane extracts, +50% at d16 to d32
-        /// on an Apple M3 Max), and a scalar loop over the whole leftover was
-        /// one long dependent add chain.
+        /// Inputs shorter than `LANES` and the leftover after the wide blocks
+        /// run in four lanes plus a scalar tail of fewer than four. The wide
+        /// lane array halves pairwise to four lanes. How those four lanes
+        /// end depends on the target, because LLVM's choice of vectorizer
+        /// for the main loop depends on it (disassembly and timings, 2026-11):
+        ///
+        /// - x86: sum them to a scalar here and reduce the leftover
+        ///   separately. Carrying them into the leftover made LLVM vectorize
+        ///   the main loop two lanes at a time (`movsd`), 1.8x slower at
+        ///   d768 on a Ryzen 5600X.
+        /// - elsewhere: carry them into the leftover's four lanes and end in
+        ///   one horizontal sum. A separate scalar sum here made LLVM
+        ///   scalarize the reduction on aarch64 (lane extracts), 1.5x slower
+        ///   at d16 to d32 on an Apple M3 Max.
+        ///
+        /// `benches/probe/codegen.sh` checks the main loop's load width.
         #[inline(always)]
         pub(crate) fn $name(a: &[$t], b: &[$t], term: impl Fn($t, $t) -> $t) -> $t {
-            let n = a.len().min(b.len());
-            let (mut a, mut b) = (&a[..n], &b[..n]);
-            let mut q = [0.0; 4];
-            if n >= $lanes {
-                let (ca, ra) = a.as_chunks::<{ $lanes }>();
-                let (cb, rb) = b.as_chunks::<{ $lanes }>();
-                let mut acc = [0.0; $lanes];
+            let narrow = |a: &[$t], b: &[$t], mut q: [$t; 4]| -> $t {
+                let (ca, ra) = a.as_chunks::<4>();
+                let (cb, rb) = b.as_chunks::<4>();
                 for (x, y) in ca.iter().zip(cb) {
-                    for i in 0..$lanes {
-                        acc[i] += term(x[i], y[i]);
+                    for i in 0..4 {
+                        q[i] += term(x[i], y[i]);
                     }
                 }
-                // Halve pairwise down to four lanes: two dependent vector
-                // adds for sixteen lanes instead of a chain of four.
-                let mut w = $lanes;
-                while w > 4 {
-                    w /= 2;
-                    for i in 0..w {
-                        acc[i] += acc[i + w];
-                    }
+                let mut tail = 0.0;
+                for (&x, &y) in ra.iter().zip(rb) {
+                    tail += term(x, y);
                 }
-                q.copy_from_slice(&acc[..4]);
-                (a, b) = (ra, rb);
+                (q[0] + q[2]) + (q[1] + q[3]) + tail
+            };
+            let n = a.len().min(b.len());
+            if n < $lanes {
+                return narrow(&a[..n], &b[..n], [0.0; 4]);
             }
-            let (ca, ra) = a.as_chunks::<4>();
-            let (cb, rb) = b.as_chunks::<4>();
+            let (ca, ra) = a[..n].as_chunks::<{ $lanes }>();
+            let (cb, rb) = b[..n].as_chunks::<{ $lanes }>();
+            let mut acc = [0.0; $lanes];
             for (x, y) in ca.iter().zip(cb) {
-                for i in 0..4 {
-                    q[i] += term(x[i], y[i]);
+                for i in 0..$lanes {
+                    acc[i] += term(x[i], y[i]);
                 }
             }
-            let mut tail = 0.0;
-            for (&x, &y) in ra.iter().zip(rb) {
-                tail += term(x, y);
+            let mut w = $lanes;
+            while w > 4 {
+                w /= 2;
+                for i in 0..w {
+                    acc[i] += acc[i + w];
+                }
             }
-            (q[0] + q[2]) + (q[1] + q[3]) + tail
+            if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+                ((acc[0] + acc[2]) + (acc[1] + acc[3])) + narrow(ra, rb, [0.0; 4])
+            } else {
+                narrow(ra, rb, [acc[0], acc[1], acc[2], acc[3]])
+            }
         }
     };
 }
@@ -97,7 +107,9 @@ fold_pairs!(fold_f64, f64, F64_LANES);
 /// across the sums instead of across lanes (two-wide shuffles and stack
 /// spills on x86_64), and three passes measured 1.4x to 2x faster from d32
 /// up on both AVX2-class x86 and Apple NEON. The re-reads hit L1 at
-/// embedding sizes.
+/// embedding sizes. One shared size check (instead of one per pass) was
+/// slower in the crate on x86 (d16 21.2 against 19.0 ns), though a
+/// standalone copy had measured it faster.
 #[inline(always)]
 pub(crate) fn cosine_parts_f32(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
     let n = a.len().min(b.len());

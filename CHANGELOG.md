@@ -15,16 +15,24 @@
   runs the portable kernels, as the published 0.6.3 does without SIMD. Enable
   `features = ["simd"]` for runtime-dispatched kernels.
 - The SIMD kernels sum in a different order than in 0.6.3 (native-width
-  vectors, four accumulators, fused multiply-add), so f32 results can differ
+  vectors, eight accumulators, two for inputs shorter than eight vectors,
+  fused multiply-add), so f32 results can differ
   in the last bits (up to about 2e-6 relative on the test fixtures). Accuracy tests
   now bound every reduction against a higher-precision reference instead of
   pinning exact bits.
 - The portable kernels (dot, squared L2, L1, cosine and norm for `f32` and
   `f64`, mixed `f32`-by-`u8` dot, `u8` dot and byte Hamming) keep 8 to 32
-  independent accumulator lanes over `as_chunks` blocks with a scalar
-  remainder, so LLVM vectorizes them without reassociating float adds.
-  Portable f32 results can differ from 0.6.3 in the last bits (up to about
-  6e-6 relative on the test fixtures); integer results are unchanged.
+  independent accumulator lanes over `as_chunks` blocks, so LLVM vectorizes
+  them without reassociating float adds. The `f32`/`f64` folds finish the
+  leftover in four lanes, and their final reduction differs between x86 and
+  other targets, chosen from disassembly of what LLVM generates for each.
+  Portable cosine is three folds instead of one fused pass. On a Ryzen 5600X
+  (baseline x86-64, no `simd`), portable dot at d128 went from about 20 to
+  13 ns and portable cosine at d768 from about 410 to 135 ns. Portable f32
+  results can differ from 0.6.3 in the last bits (up to about 6e-6 relative
+  on the test fixtures); integer results are unchanged.
+- `slot_hamming_u64` counts mismatches with a plain loop that LLVM
+  vectorizes on x86 (about 1.5x faster on a Ryzen 5600X; unchanged on NEON).
 - `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
   SIMD-sized inputs instead of a refined hardware rsqrt estimate.
 - Byte Hamming switches to SIMD at 128 bytes (was 32 on NEON/AVX2 and 64 on

@@ -107,7 +107,7 @@ def main():
     out.append("- Command: `benches/report.sh OUT.md` (see the script header)")
     out.append("")
     out.append("Cells are Criterion medians. `innr_portable` is innr built with")
-    out.append("`--no-default-features`; `innr_simd` is the default build. `local_*`")
+    out.append("`--no-default-features`; `innr_simd` is built with `--features simd`. `local_*`")
     out.append(
         "columns are the consumer's own no-innr fallback, copied verbatim (sources"
     )

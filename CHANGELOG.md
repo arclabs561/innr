@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2
+
+### Fixed
+
+- NaN scores rank last in every ranking (`TopK`, `batch_knn`,
+  `batch_knn_dot`, `batch_knn_cosine`, the `u8` kNN, `distance` argmin),
+  whatever the NaN's sign. `f32::total_cmp` ranked positive NaN first in
+  descending rankings and negative NaN (x86's default for invalid
+  operations) first in ascending ones.
+- `cosine` returns the right value when entries are large enough (above
+  about 1.8e19) that the `f32` sums of squares overflow; those inputs are
+  recomputed in `f64`.
+- `PackedTernary::new` stores the reserved code `0b11` as 0, so
+  `ternary_hamming` agrees with `get` and `ternary_dot`.
+
 ## 0.7.1
 
 ### Fixed

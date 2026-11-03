@@ -7,13 +7,16 @@
 #   benches/probe/codegen.sh            # check
 #   benches/probe/codegen.sh --print    # also print the instruction mix
 #
-# x86_64 requires `movups` (128-bit unaligned loads) in each checked symbol;
-# aarch64 requires `ldr q` / `ldp q` (128-bit loads). Needs objdump.
+# x86_64 counts `movups` (128-bit unaligned loads), aarch64 `ldr q` / `ldp q`.
+# Each checked symbol needs MIN_WIDE of them: a vectorized main loop has 12
+# to 68, while the four-lane leftover path alone has a few, so one stray wide
+# load cannot pass the check. Needs objdump.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
 PRINT=0
 [[ "${1:-}" == "--print" ]] && PRINT=1
+MIN_WIDE=6
 
 cargo build -q --release --manifest-path "$ROOT/Cargo.toml"
 TARGET="$(cargo metadata -q --format-version 1 --no-deps --manifest-path "$ROOT/Cargo.toml" \
@@ -44,8 +47,8 @@ for sym in probe_dot_portable probe_cosine_portable; do
     printf '%s\n' "$body" | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[a-z][a-z0-9.]+$/) {print $i; break}}' \
       | sort | uniq -c | sort -rn | head -12
   fi
-  if [[ "$wide" -eq 0 ]]; then
-    echo "FAIL $sym: no full-width vector loads; the auto-vectorizer lost this loop" >&2
+  if [[ "$wide" -lt "$MIN_WIDE" ]]; then
+    echo "FAIL $sym: $wide full-width loads (< $MIN_WIDE); the auto-vectorizer lost the main loop" >&2
     fail=1
   fi
 done

@@ -75,6 +75,11 @@ jobs:
       - name: Benchmarks compile
         run: cargo build --benches --all-features
 
+      # The portable kernels rely on the auto-vectorizer; fail if the main
+      # loop stops using full-width loads (benches/probe/codegen.sh).
+      - name: Portable codegen check (x86_64)
+        run: benches/probe/codegen.sh
+
       # Verify SIMD produces correct results vs scalar
       - name: SIMD differential tests
         run: cargo test simd_correctness --all-features
@@ -157,6 +162,9 @@ jobs:
 
       - name: SIMD correctness (NEON)
         run: cargo test simd_correctness --all-features
+
+      - name: Portable codegen check (aarch64)
+        run: benches/probe/codegen.sh
 
   # Linux ARM native (Cobalt 100 / Neoverse N2, Armv9). Free for public
   # repos; real aarch64 silicon distinct from macOS NEON and from QEMU. Do

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.3
+
+### Added
+
+- `corpus::Corpus`: packs `f32` rows once, each row on a 64-byte boundary
+  from 16 dimensions up, and scores a query against every row inside one
+  SIMD dispatch. `scores`, `scores_into`, `top_k` and `top_k_many` take the
+  metric as a type parameter; `top_k` keeps the best `k` during the scan
+  and returns `Hit { index, score }`, best first, NaN last. Brute-force
+  scan at 128 dimensions, per row vs `Corpus`: x86_64 Linux 1.9-2.4x,
+  Apple M3 Max 1.2-2.05x; exact top-k from 768 dimensions at parity.
+
 ## 0.7.2
 
 ### Fixed

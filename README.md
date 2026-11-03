@@ -83,6 +83,22 @@ use innr::distance::DistSlotU32;
 let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 ```
 
+**Packed corpus**: `corpus::Corpus` packs `f32` rows once, each row aligned,
+and scores a query against every row in one SIMD dispatch, with top-k kept
+during the scan. For brute-force scans at 128 dimensions this measured
+1.2-2.4x faster than calling a pair kernel per row (more rows, larger gain);
+from 768 dimensions top-k costs the same either way.
+
+```rust
+use innr::corpus::Corpus;
+use innr::metric::Cosine;
+
+let rows = [[1.0_f32, 0.0], [0.0, 1.0], [0.7, 0.7]];
+let corpus = Corpus::from_rows(rows.iter().map(|r| r.as_slice()), 2).unwrap();
+let best = corpus.top_k::<Cosine>(&[0.1, 1.0], 1);
+assert_eq!(best[0].index, 1);
+```
+
 ## SIMD Dispatch
 
 With the `simd` feature:

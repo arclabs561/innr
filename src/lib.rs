@@ -129,6 +129,8 @@ pub mod fast_math;
 /// Batch vector operations with columnar (PDX-style) layout.
 pub mod batch;
 
+pub mod corpus;
+
 /// Sparse vector dot product via sorted-index merge join.
 mod sparse;
 

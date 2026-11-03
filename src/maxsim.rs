@@ -45,10 +45,6 @@
 
 use crate::dense::{cosine, dot};
 
-// arch is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
 /// MaxSim: sum over query tokens of max dot product with any doc token.
 ///
 /// # Arguments
@@ -67,8 +63,9 @@ use crate::arch;
 ///
 /// # SIMD Optimization
 ///
-/// Automatically dispatches to AVX-512 or AVX2 optimized kernels on x86_64
-/// that process multiple vectors without repeated dispatch overhead.
+/// With the `simd` feature and `dim >= 16`, the SIMD level is chosen once
+/// for the whole query-by-document block, and every pair runs on it without
+/// per-pair dispatch.
 ///
 /// # Example
 ///
@@ -108,30 +105,14 @@ pub fn maxsim(query_tokens: &[&[f32]], doc_tokens: &[&[f32]]) -> f32 {
         "dimension mismatch (doc)"
     );
 
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        // AVX-512
-        if dim >= 64 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::maxsim_avx512(simd, query_tokens, doc_tokens);
-            }
-        }
-
-        // AVX2
-        if dim >= 16 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::maxsim_avx2(simd, query_tokens, doc_tokens);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if dim >= 16 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::maxsim_neon(simd, query_tokens, doc_tokens);
-            }
-        }
+    // One dispatch for the whole |Q| x |D| block, not one per pair.
+    #[cfg(feature = "simd")]
+    if dim >= crate::MIN_DIM_SIMD {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::maxsim(s, query_tokens, doc_tokens),
+            _ => maxsim_portable(query_tokens, doc_tokens),
+        );
     }
 
     // Fallback (scalar / auto-vectorized)

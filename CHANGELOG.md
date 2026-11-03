@@ -1,29 +1,72 @@
 # Changelog
 
-## [Unreleased]
+## 0.7.0
 
 ### Changed
 
-- Require Rust 1.94 for the development Pulp revision's x86 intrinsics, and
-  document the full Pulp V3/V4 CPU requirements. The extended property CI job
-  now selects its named integration targets instead of an empty name filter;
-  explicit test-local case limits remain in effect.
-- Pinned the development SIMD dependency to upstream Pulp commit
-  `601de0c071ba32df3fd7ff33fc4218c9bd712aba`, using `pastey`, without an
-  advisory exception. Registry publication remains gated on a published
-  replacement and release validation; dependency internals still use unsafe Rust.
-- Replaced local unsafe SIMD code with safe `pulp` kernels and forbade unsafe
-  code in innr. The new default `simd` feature depends on `pulp`; use
-  `default-features = false` for dependency-free portable kernels.
-- Changed x86 dispatch to require `pulp`'s V3 (x86-64-v3) and V4 (x86-64-v4)
-  feature sets, which require more CPU features than the previous AVX2/FMA and
-  AVX-512 checks. CPUs without these tokens use a lower supported backend.
-- Replaced the AVX-512 Hamming VPOPCNTDQ kernel with an AVX-512BW nibble lookup
-  kernel. Dispatch length thresholds were retained.
+- The SIMD backend is now [`fearless_simd`](https://crates.io/crates/fearless_simd)
+  1.2, behind the `simd` feature. innr's local `std::arch` unsafe kernels are
+  replaced by one set of safe kernels generic over `fearless_simd::Simd`,
+  dispatched at runtime to AVX-512 (Ice Lake-class), AVX2+FMA (x86-64-v3),
+  NEON or WASM SIMD128. innr now forbids unsafe code. x86 CPUs with only the
+  older AVX-512 subset (Skylake-X) run the AVX2+FMA kernels; x86 CPUs without
+  x86-64-v3 run the portable kernels.
+- The `simd` feature is on by default, so default users keep SIMD as in
+  0.6.3. `default-features = false` gives a dependency-free build with the
+  portable kernels; prefer it on CPUs with neither AVX2 nor NEON, where the
+  `simd` build falls back to portable code behind a dispatch check (up to
+  24% slower at small sizes on a Celeron J3455). The README's Performance
+  section lists what `simd` buys on six measured ARM and x86 CPUs.
+- The SIMD kernels sum in a different order than in 0.6.3 (native-width
+  vectors, eight accumulators, two for inputs shorter than eight vectors,
+  fused multiply-add), so f32 results can differ
+  in the last bits (up to about 2e-6 relative on the test fixtures). Accuracy tests
+  now bound every reduction against a higher-precision reference instead of
+  pinning exact bits.
+- The portable kernels (dot, squared L2, L1, cosine and norm for `f32` and
+  `f64`, mixed `f32`-by-`u8` dot, `u8` dot and byte Hamming) keep 8 to 32
+  independent accumulator lanes over `as_chunks` blocks, so LLVM vectorizes
+  them without reassociating float adds. The `f32`/`f64` folds finish the
+  leftover in four lanes, and their final reduction differs between x86 and
+  other targets, chosen from disassembly of what LLVM generates for each.
+  Portable cosine is three folds instead of one fused pass. On a Ryzen 5600X
+  (baseline x86-64, no `simd`; before and after are separate runs on an idle
+  host), portable dot at d128 went from about 20 to 13 ns and portable
+  cosine at d768 from about 410 to 135 ns. Portable f32
+  results can differ from 0.6.3 in the last bits (up to about 6e-6 relative
+  on the test fixtures); integer results are unchanged.
+- `slot_hamming_u64` counts mismatches with a plain loop that LLVM
+  vectorizes on x86 (about 1.5x faster on a Ryzen 5600X; unchanged on NEON).
+- On x86, the SIMD float reductions align the second input to the vector
+  width before folding inputs of 512 `f32` (AVX2) or more. Allocators only
+  guarantee 16 bytes, and a buffer 16 bytes off a 32-byte boundary splits
+  half of AVX2's loads across cache lines: with both inputs off, `dot` at
+  d4096 on a Ryzen 5600X went from 196 to 127 ns (aligned: 123 to 126).
+- `fast_cosine_dispatch` with `simd` now returns the exact fused cosine on
+  SIMD-sized inputs instead of a refined hardware rsqrt estimate.
+- Byte Hamming switches to SIMD at 128 bytes (was 32 on NEON/AVX2 and 64 on
+  AVX-512); below that the portable kernel, now on 64-bit words, measured as
+  fast. `slot_hamming_u64` always runs the portable kernel: a SIMD kernel
+  measured no faster on NEON at 4 to 1024 slots.
+- Portable dense kernels take a four-lane path below 16 (`f32`) or 8 (`f64`)
+  elements, measured faster than the wide lane array and than a sequential
+  loop for 3 to 12 dimensions.
+- MSRV is Rust 1.89, the minimum for `fearless_simd` 1.2.
+- The extended property CI job now selects its named integration targets
+  instead of an empty name filter; explicit test-local case limits remain in
+  effect.
 
-- Preserve the public `fast_math` module and root `fast_cosine`,
-  `fast_cosine_dispatch`, `fast_rsqrt`, and `fast_rsqrt_precise` exports with
-  safe implementations, including the existing length-mismatch panic contracts.
+### Added
+
+- `innr::capabilities()` returns `backend::Capabilities`: the SIMD level in
+  use and `backend::Thresholds`, the input length at which each kernel family
+  switches from the portable to the SIMD kernel. Its `Display` prints both on
+  one line for benchmark output and bug reports.
+  `backend::Backend::WasmSimd128` names the WASM level.
+- `innr::metric`: metrics as zero-sized types (`Dot`, `Cosine`, `L2Sq`, `L1`,
+  `Hamming`) implementing a sealed `Metric<T>` trait with a `DIRECTION`
+  (similarity or distance), and a sealed `Element` trait carrying each element
+  type's accumulator. The free functions are thin wrappers over these.
 
 ### Fixed
 

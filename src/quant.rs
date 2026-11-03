@@ -9,22 +9,13 @@
 //! # Dispatch
 //!
 //! Both functions use the same runtime-dispatch pattern as the rest of this crate:
-//! AVX-512 > AVX2 > NEON > portable.
+//! with the `simd` feature, AVX-512 > AVX2 > NEON > WASM SIMD128 > portable.
 
-// arch is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
-/// Minimum vector length for SIMD to be worthwhile on these integer paths.
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-const MIN_DIM_SIMD: usize = 32;
-
-/// Minimum dimension for the AVX-512 path (64-byte chunks).
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-const MIN_DIM_AVX512: usize = 64;
+use crate::metric::{eval_unchecked, Dot, Hamming};
 
 /// Largest number of maximal u8 products whose sum fits in a `u32`.
-const MAX_U32_DOT_DIM: usize = u32::MAX as usize / (u8::MAX as usize * u8::MAX as usize);
+#[cfg_attr(not(any(feature = "simd", test)), allow(dead_code))]
+pub(crate) const MAX_U32_DOT_DIM: usize = u32::MAX as usize / (u8::MAX as usize * u8::MAX as usize);
 
 /// Unsigned 8-bit integer dot product: `Σ(a[i] * b[i])`.
 ///
@@ -33,11 +24,9 @@ const MAX_U32_DOT_DIM: usize = u32::MAX as usize / (u8::MAX as usize * u8::MAX a
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 on x86_64 (runtime detection, n >= 64)
-/// - AVX2 on x86_64 (runtime detection, n >= 32)
-/// - NEON on aarch64 (always available, n >= 32)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 32`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -86,11 +75,7 @@ pub fn dot_u8_wide(a: &[u8], b: &[u8]) -> u64 {
         b.len()
     );
 
-    a.chunks(MAX_U32_DOT_DIM)
-        .zip(b.chunks(MAX_U32_DOT_DIM))
-        .map(|(a, b)| dot_u8_chunk(a, b) as u64)
-        .try_fold(0_u64, u64::checked_add)
-        .expect("innr::dot_u8_wide: result exceeds u64::MAX")
+    eval_unchecked::<u8, Dot>(a, b)
 }
 
 /// Unsigned 8-bit integer dot product if its result fits in `u32`.
@@ -103,46 +88,8 @@ pub fn checked_dot_u8(a: &[u8], b: &[u8]) -> Option<u32> {
     u32::try_from(dot_u8_wide(a, b)).ok()
 }
 
-#[inline]
-fn dot_u8_chunk(a: &[u8], b: &[u8]) -> u32 {
-    debug_assert_eq!(a.len(), b.len());
-    debug_assert!(a.len() <= MAX_U32_DOT_DIM);
-
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::dot_u8_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::dot_u8_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::dot_u8_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    dot_u8_portable(a, b)
-}
-
-/// Portable (non-SIMD) u8 dot product with 4-way unrolled accumulators.
-///
-/// Uses four independent u32 accumulators to avoid data-dependency stalls
-/// on pipelined CPUs. LLVM typically vectorizes this further.
+/// Portable (non-SIMD) u8 dot product with sixteen `u32` accumulator lanes
+/// that LLVM vectorizes.
 #[inline]
 #[must_use]
 pub fn dot_u8_portable(a: &[u8], b: &[u8]) -> u32 {
@@ -157,29 +104,7 @@ pub fn dot_u8_portable(a: &[u8], b: &[u8]) -> u32 {
 #[inline]
 #[must_use]
 pub fn dot_u8_wide_portable(a: &[u8], b: &[u8]) -> u64 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0: u64 = 0;
-    let mut s1: u64 = 0;
-    let mut s2: u64 = 0;
-    let mut s3: u64 = 0;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += a[base] as u64 * b[base] as u64;
-        s1 += a[base + 1] as u64 * b[base + 1] as u64;
-        s2 += a[base + 2] as u64 * b[base + 2] as u64;
-        s3 += a[base + 3] as u64 * b[base + 3] as u64;
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-
-    for i in (chunks * 4)..n {
-        result += a[i] as u64 * b[i] as u64;
-    }
-
-    result
+    crate::portable::dot_u8_wide(a, b)
 }
 
 /// Hamming distance between two byte-packed bit vectors.
@@ -191,11 +116,10 @@ pub fn dot_u8_wide_portable(a: &[u8], b: &[u8]) -> u64 {
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 with VPOPCNTDQ on x86_64 (runtime detection, n >= 64)
-/// - AVX2 with VPSHUFB LUT on x86_64 (runtime detection, n >= 32)
-/// - NEON on aarch64 (vcntq_u8, always available, n >= 32)
-/// - Portable fallback otherwise
+/// With the `simd` feature and at least 128 bytes, dispatches at runtime to
+/// the best available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128);
+/// shorter inputs run the portable kernel, which XORs 64-bit words and
+/// measured as fast as the SIMD kernel below 128 bytes.
 ///
 /// # Panics
 ///
@@ -222,45 +146,14 @@ pub fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::hamming_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::hamming_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::hamming_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    hamming_portable(a, b)
+    eval_unchecked::<u8, Hamming>(a, b)
 }
 
 /// Portable (non-SIMD) Hamming distance: XOR bytes then count bits.
 #[inline]
 #[must_use]
 pub fn hamming_portable(a: &[u8], b: &[u8]) -> u32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x ^ y).count_ones())
-        .sum()
+    crate::portable::hamming(a, b)
 }
 
 #[cfg(test)]
@@ -274,15 +167,6 @@ mod tests {
             .map(|(&x, &y)| u128::from(x) * u128::from(y))
             .sum();
         u64::try_from(exact).expect("test vector dot product fits in u64")
-    }
-
-    /// Evaluates a u32 kernel in chunks that cannot overflow and sums in u64.
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    fn wide_from_kernel(a: &[u8], b: &[u8], kernel: impl Fn(&[u8], &[u8]) -> u32) -> u64 {
-        a.chunks(MAX_U32_DOT_DIM)
-            .zip(b.chunks(MAX_U32_DOT_DIM))
-            .map(|(a, b)| kernel(a, b) as u64)
-            .sum()
     }
 
     // =========================================================================
@@ -331,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_dot_u8_large_simd() {
-        // dim=128: exercises AVX2 and NEON paths
+        // dim=128: exercises the SIMD kernels when `simd` is on
         let a: Vec<u8> = (0..128u8).collect();
         let b: Vec<u8> = (0..128u8).collect();
         let expected: u32 = (0..128u32).map(|i| i * i).sum();
@@ -385,58 +269,25 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
+    /// The SIMD kernel, on the native level and on fearless_simd's scalar
+    /// fallback level, at the u32 chunk boundary and on a mixed pattern.
+    #[cfg(feature = "simd")]
     #[test]
-    fn x86_dot_u8_kernels_match_oracle_at_overflow_boundary() {
-        let sizes = [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1];
-        for size in sizes {
-            let a = vec![u8::MAX; size];
-            let expected = dot_u8_oracle(&a, &a);
-
-            if let Some(v3) = pulp::x86::V3::try_new() {
-                let got =
-                    wide_from_kernel(&a, &a, |x, y| crate::arch::x86_64::dot_u8_avx2(v3, x, y));
-                assert_eq!(got, expected, "AVX2 mismatch at size {size}");
+    fn simd_dot_u8_kernel_matches_oracle_at_overflow_boundary() {
+        use crate::metric::{sealed::Kernel, Dot};
+        fn check<S: fearless_simd::Simd>(s: S) {
+            let kernel = |x: &[u8], y: &[u8]| s.vectorize(|| <Dot as Kernel<u8>>::simd(s, x, y));
+            for size in [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1] {
+                let a = vec![u8::MAX; size];
+                assert_eq!(kernel(&a, &a), dot_u8_oracle(&a, &a), "size {size}");
             }
-            if let Some(v4) = pulp::x86::V4::try_new() {
-                let got =
-                    wide_from_kernel(&a, &a, |x, y| crate::arch::x86_64::dot_u8_avx512(v4, x, y));
-                assert_eq!(got, expected, "AVX-512 mismatch at size {size}");
-            }
+            let size = 4097;
+            let a: Vec<u8> = (0..size).map(|i| ((i * 73 + 19) % 256) as u8).collect();
+            let b: Vec<u8> = (0..size).map(|i| ((i * 151 + 41) % 256) as u8).collect();
+            assert_eq!(kernel(&a, &b), dot_u8_oracle(&a, &b), "random pattern");
         }
-
-        let size = 4097;
-        let a: Vec<u8> = (0..size).map(|i| ((i * 73 + 19) % 256) as u8).collect();
-        let b: Vec<u8> = (0..size).map(|i| ((i * 151 + 41) % 256) as u8).collect();
-        let expected = dot_u8_oracle(&a, &b);
-        if let Some(v3) = pulp::x86::V3::try_new() {
-            let got = wide_from_kernel(&a, &b, |x, y| crate::arch::x86_64::dot_u8_avx2(v3, x, y));
-            assert_eq!(got, expected, "AVX2 random-pattern mismatch");
-        }
-        if let Some(v4) = pulp::x86::V4::try_new() {
-            let got = wide_from_kernel(&a, &b, |x, y| crate::arch::x86_64::dot_u8_avx512(v4, x, y));
-            assert_eq!(got, expected, "AVX-512 random-pattern mismatch");
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    #[test]
-    fn neon_dot_u8_kernel_matches_oracle_at_overflow_boundary() {
-        let neon = pulp::aarch64::Neon::try_new().unwrap();
-        let kernel = |x: &[u8], y: &[u8]| crate::arch::aarch64::dot_u8_neon(neon, x, y);
-        for size in [MAX_U32_DOT_DIM, MAX_U32_DOT_DIM + 1] {
-            let a = vec![u8::MAX; size];
-            let expected = dot_u8_oracle(&a, &a);
-            let got = wide_from_kernel(&a, &a, kernel);
-            assert_eq!(got, expected, "NEON mismatch at size {size}");
-        }
-
-        let size = 4097;
-        let a: Vec<u8> = (0..size).map(|i| ((i * 73 + 19) % 256) as u8).collect();
-        let b: Vec<u8> = (0..size).map(|i| ((i * 151 + 41) % 256) as u8).collect();
-        let expected = dot_u8_oracle(&a, &b);
-        let got = wide_from_kernel(&a, &b, kernel);
-        assert_eq!(got, expected, "NEON random-pattern mismatch");
+        fearless_simd::dispatch!(fearless_simd::Level::new(), s => check(s));
+        check(fearless_simd::Fallback::new());
     }
 
     #[test]

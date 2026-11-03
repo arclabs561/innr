@@ -2,28 +2,14 @@
 //!
 //! Core operations: dot product, norm, cosine similarity, L2 distance.
 //!
-//! # Performance Hierarchy
+//! # Dispatch
 //!
-//! Runtime dispatch selects the fastest available implementation:
-//!
-//! | ISA | Min dim | Typical speedup |
-//! |-----|---------|-----------------|
-//! | AVX-512 | 64 | ~10-20x vs scalar |
-//! | AVX2+FMA | 16 | 5-10x vs scalar |
-//! | NEON | 16 | 4-8x vs scalar |
-//! | Portable | any | 1x (baseline) |
+//! With the `simd` feature, inputs of 16 or more elements run a
+//! `fearless_simd` kernel on the best runtime-detected level (AVX-512,
+//! AVX2+FMA, NEON, WASM SIMD128). Shorter inputs, and builds without the
+//! feature, run the portable kernels.
 
-// arch is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
-// MIN_DIM_SIMD is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::MIN_DIM_SIMD;
-
-/// Minimum dimension for AVX-512 (64 floats = one unrolled iteration).
-#[cfg(all(feature = "simd", target_arch = "x86_64"))]
-pub(crate) const MIN_DIM_AVX512: usize = 64;
+use crate::metric::{eval_unchecked, Cosine, Dot, L2Sq, L1};
 
 /// Dot product of two vectors: `Σ(a[i] * b[i])`.
 ///
@@ -31,11 +17,9 @@ pub(crate) const MIN_DIM_AVX512: usize = 64;
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 on x86_64 (runtime detection, n >= 64)
-/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
-/// - NEON on aarch64 (always available, n >= 16)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 16`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -61,68 +45,19 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        // Prefer AVX-512 for large vectors (16 floats/register, 4-way unrolled)
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::dot_avx512(simd, a, b);
-            }
-        }
-
-        // Fall back to AVX2+FMA (8 floats/register, 4-way unrolled)
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::dot_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::dot_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    dot_portable(a, b)
+    eval_unchecked::<f32, Dot>(a, b)
 }
 
 /// Portable (non-SIMD) dot product.
 ///
-/// Uses four independent accumulators to avoid data-dependency stalls on
-/// pipelined CPUs. LLVM can also auto-vectorize this for common architectures,
-/// but explicit SIMD implementations are faster for dimension >= 16.
+/// Sixteen independent accumulator lanes let LLVM vectorize the loop for the
+/// compile target without reassociating floating-point adds; results agree
+/// with a sequential sum to rounding. Compares the common prefix when the
+/// lengths differ.
 #[inline]
 #[must_use]
 pub fn dot_portable(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f32;
-    let mut s1 = 0.0f32;
-    let mut s2 = 0.0f32;
-    let mut s3 = 0.0f32;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += a[base] * b[base];
-        s1 += a[base + 1] * b[base + 1];
-        s2 += a[base + 2] * b[base + 2];
-        s3 += a[base + 3] * b[base + 3];
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        result += a[i] * b[i];
-    }
-    result
+    crate::portable::fold_f32(a, b, |x, y| x * y)
 }
 
 /// L2 norm (Euclidean norm) of a vector: `sqrt(Σ(v[i]²))`.
@@ -209,11 +144,9 @@ pub fn normalize_with_norm(v: &mut [f32]) -> f32 {
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 on x86_64 (runtime detection, n >= 64)
-/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
-/// - NEON on aarch64 (always available, n >= 16)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 16`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -249,97 +182,24 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::cosine_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::cosine_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::cosine_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    cosine_portable(a, b)
+    eval_unchecked::<f32, Cosine>(a, b)
 }
 
 /// Portable (non-SIMD) cosine similarity.
 ///
-/// Single-pass: accumulates dot(a,b), ||a||^2, ||b||^2 simultaneously.
-/// Four independent accumulators per quantity break the FP latency chain
-/// and allow CPUs to execute multiple multiply-adds in parallel.
+/// Single-pass: accumulates dot(a,b), ||a||^2, ||b||^2 simultaneously, each
+/// in eight independent accumulator lanes LLVM can vectorize.
 #[inline]
 #[must_use]
 pub fn cosine_portable(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
+    let (ab, aa, bb) = crate::portable::cosine_parts_f32(a, b);
+    finish_cosine(ab, aa, bb)
+}
 
-    let mut ab0 = 0.0f32;
-    let mut ab1 = 0.0f32;
-    let mut ab2 = 0.0f32;
-    let mut ab3 = 0.0f32;
-    let mut aa0 = 0.0f32;
-    let mut aa1 = 0.0f32;
-    let mut aa2 = 0.0f32;
-    let mut aa3 = 0.0f32;
-    let mut bb0 = 0.0f32;
-    let mut bb1 = 0.0f32;
-    let mut bb2 = 0.0f32;
-    let mut bb3 = 0.0f32;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        let a0 = a[base];
-        let b0 = b[base];
-        let a1 = a[base + 1];
-        let b1 = b[base + 1];
-        let a2 = a[base + 2];
-        let b2 = b[base + 2];
-        let a3 = a[base + 3];
-        let b3 = b[base + 3];
-        ab0 += a0 * b0;
-        aa0 += a0 * a0;
-        bb0 += b0 * b0;
-        ab1 += a1 * b1;
-        aa1 += a1 * a1;
-        bb1 += b1 * b1;
-        ab2 += a2 * b2;
-        aa2 += a2 * a2;
-        bb2 += b2 * b2;
-        ab3 += a3 * b3;
-        aa3 += a3 * a3;
-        bb3 += b3 * b3;
-    }
-
-    let mut ab = ab0 + ab1 + ab2 + ab3;
-    let mut aa = aa0 + aa1 + aa2 + aa3;
-    let mut bb = bb0 + bb1 + bb2 + bb3;
-
-    for i in (chunks * 4)..n {
-        let ai = a[i];
-        let bi = b[i];
-        ab += ai * bi;
-        aa += ai * ai;
-        bb += bi * bi;
-    }
-
+/// Cosine from its three sums, `0.0` when either squared norm is effectively
+/// zero (this also absorbs NaN inputs).
+#[inline]
+pub(crate) fn finish_cosine(ab: f32, aa: f32, bb: f32) -> f32 {
     if aa > crate::NORM_EPSILON_SQ && bb > crate::NORM_EPSILON_SQ {
         ab / (aa.sqrt() * bb.sqrt())
     } else {
@@ -484,11 +344,9 @@ pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 on x86_64 (runtime detection, n >= 64)
-/// - AVX2 on x86_64 (runtime detection, n >= 16)
-/// - NEON on aarch64 (always available, n >= 16)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 16`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -515,64 +373,15 @@ pub fn l1_distance(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::l1_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::l1_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::l1_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    l1_distance_portable(a, b)
+    eval_unchecked::<f32, L1>(a, b)
 }
 
-/// Portable (non-SIMD) L1 distance.
-///
-/// Four independent accumulators break the FP latency chain.
+/// Portable (non-SIMD) L1 distance, with sixteen accumulator lanes LLVM can
+/// vectorize. Compares the common prefix when the lengths differ.
 #[inline]
 #[must_use]
 pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f32;
-    let mut s1 = 0.0f32;
-    let mut s2 = 0.0f32;
-    let mut s3 = 0.0f32;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        s0 += (a[base] - b[base]).abs();
-        s1 += (a[base + 1] - b[base + 1]).abs();
-        s2 += (a[base + 2] - b[base + 2]).abs();
-        s3 += (a[base + 3] - b[base + 3]).abs();
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        result += (a[i] - b[i]).abs();
-    }
-    result
+    crate::portable::fold_f32(a, b, |x, y| (x - y).abs())
 }
 
 /// Squared L2 distance: `Σ(a[i] - b[i])²`.
@@ -584,11 +393,9 @@ pub fn l1_distance_portable(a: &[f32], b: &[f32]) -> f32 {
 ///
 /// # SIMD Acceleration
 ///
-/// Automatically dispatches to (in order of preference):
-/// - AVX-512 on x86_64 (runtime detection, n >= 64)
-/// - AVX2+FMA on x86_64 (runtime detection, n >= 16)
-/// - NEON on aarch64 (always available, n >= 16)
-/// - Portable fallback otherwise
+/// With the `simd` feature and `n >= 16`, dispatches at runtime to the best
+/// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
+/// the portable kernel.
 ///
 /// # Panics
 ///
@@ -614,69 +421,18 @@ pub fn l2_distance_squared(a: &[f32], b: &[f32]) -> f32 {
         b.len()
     );
 
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len();
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= MIN_DIM_AVX512 {
-            if let Some(simd) = pulp::x86::V4::try_new() {
-                return arch::x86_64::l2_squared_avx512(simd, a, b);
-            }
-        }
-
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::l2_squared_avx2(simd, a, b);
-            }
-        }
-    }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= MIN_DIM_SIMD {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::l2_squared_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
-    l2_distance_squared_portable(a, b)
+    eval_unchecked::<f32, L2Sq>(a, b)
 }
 
-/// Portable (non-SIMD) squared L2 distance.
-///
-/// Four independent accumulators break the FP latency chain.
+/// Portable (non-SIMD) squared L2 distance, with sixteen accumulator lanes
+/// LLVM can vectorize. Compares the common prefix when the lengths differ.
 #[inline]
 #[must_use]
 pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
-    let n = a.len().min(b.len());
-    let chunks = n / 4;
-
-    let mut s0 = 0.0f32;
-    let mut s1 = 0.0f32;
-    let mut s2 = 0.0f32;
-    let mut s3 = 0.0f32;
-
-    for i in 0..chunks {
-        let base = i * 4;
-        let d0 = a[base] - b[base];
-        let d1 = a[base + 1] - b[base + 1];
-        let d2 = a[base + 2] - b[base + 2];
-        let d3 = a[base + 3] - b[base + 3];
-        s0 += d0 * d0;
-        s1 += d1 * d1;
-        s2 += d2 * d2;
-        s3 += d3 * d3;
-    }
-
-    let mut result = s0 + s1 + s2 + s3;
-    for i in (chunks * 4)..n {
-        let d = a[i] - b[i];
-        result += d * d;
-    }
-    result
+    crate::portable::fold_f32(a, b, |x, y| {
+        let d = x - y;
+        d * d
+    })
 }
 
 #[cfg(test)]

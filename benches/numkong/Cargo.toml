@@ -1,0 +1,25 @@
+[package]
+name = "innr-bench-numkong"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "NumKong reference column for innr's consumer-shape benchmarks"
+license = "MIT OR Apache-2.0"
+
+# A separate workspace, so innr's own builds, tests and published manifest
+# never resolve numkong (C kernels built with `cc`). benches/report.sh
+# --numkong runs it into the same Criterion directory as the innr benches.
+[workspace]
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+innr-bench-support = { path = "../support" }
+numkong = "=7.8.5"
+
+[[bench]]
+name = "numkong_pair"
+harness = false
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1

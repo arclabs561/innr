@@ -32,10 +32,6 @@
 //! - Qdrant (2023). "Scalar Quantization" -- production uint8 quantization
 //!   with quantile-based range selection
 
-// arch is only used on architectures with SIMD dispatch
-#[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-use crate::arch;
-
 /// Quantization parameters for a collection of vectors.
 ///
 /// Computed once from the corpus, applied to all vectors.
@@ -321,38 +317,21 @@ pub fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {
 
 #[inline]
 fn mixed_dot_u8_f32_dispatch(a: &[f32], b: &[u8]) -> f32 {
-    #[cfg(all(feature = "simd", any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let n = a.len().min(b.len());
-
-    #[cfg(all(feature = "simd", target_arch = "x86_64"))]
-    {
-        if n >= 16 {
-            if let Some(simd) = pulp::x86::V3::try_new() {
-                return arch::x86_64::dot_u8_f32_avx2(simd, a, b);
-            }
-        }
+    #[cfg(feature = "simd")]
+    if a.len().min(b.len()) >= crate::backend::THRESHOLDS.mixed_u8_f32 {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::mixed_dot_u8_f32(s, a, b),
+            _ => mixed_dot_u8_f32_portable(a, b),
+        );
     }
-
-    #[cfg(all(feature = "simd", target_arch = "aarch64"))]
-    {
-        if n >= 16 {
-            if let Some(simd) = pulp::aarch64::Neon::try_new() {
-                return arch::aarch64::dot_u8_f32_neon(simd, a, b);
-            }
-        }
-    }
-
-    #[allow(unreachable_code)]
     mixed_dot_u8_f32_portable(a, b)
 }
 
 /// Portable mixed-precision dot product.
 #[inline]
 pub(crate) fn mixed_dot_u8_f32_portable(a: &[f32], b: &[u8]) -> f32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(&af, &bu)| af * bu as f32)
-        .sum()
+    crate::portable::mixed_dot_u8_f32(a, b)
 }
 
 /// Batch kNN over scalar-quantized vectors.

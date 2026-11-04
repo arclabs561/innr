@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.5
+
+### Added
+
+- `Corpus<u8>`: byte-packed codes (binary quantization, sketches) in a
+  packed corpus. `scores` / `scores_into` take any byte metric; `top_k` and
+  `top_k_many` rank `Hamming` (`u32`) and `Dot` (`u64`) scores exactly, ties
+  by row order. `Corpus` is now `Corpus<T = f32>` and `Hit` is
+  `Hit<S = f32>`, so existing code is unchanged. Byte rows pad to 16 bytes.
+  On x86_64 the scan runs the SIMD Hamming kernel from 32 B, since a scan
+  dispatches once rather than per row. i7-8559U, per row, against calling
+  `hamming_distance` per code: 96 B 1.45 to 1.54x, 256 B 1.26 to 1.28x,
+  16 B 0.75x (rows shorter than one AVX2 vector; keep per-row calls there).
+  Apple M3: 16 B 1.23 to 1.37x, 96 to 256 B within 7%.
+
+### Changed
+
+- `Corpus::scores::<Cosine>` and `top_k::<Cosine>` keep each row's squared
+  norm (computed on the first cosine scan) and compute one dot product per
+  row instead of three sums. i7-8559U, per row, against per-row `cosine`:
+  d128 1.9x, d768 1.2x, d1536 1.3x; corpus cosine is within 2 to 8% of a
+  corpus dot scan. Results match `cosine` to 1e-5, including the f64
+  fallback for overflowing inputs and 0.0 for zero rows.
+
 ## 0.7.4
 
 ### Changed

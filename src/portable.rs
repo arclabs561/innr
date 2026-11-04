@@ -121,6 +121,33 @@ pub(crate) fn cosine_parts_f32(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
     )
 }
 
+/// `Σ q[i] · s[i]` where `s[i]` is `+1` if bit `i` of `code` is set and `-1`
+/// otherwise, bits LSB-first within each byte, over the first
+/// `min(q.len(), 8 · code.len())` elements.
+///
+/// Eight accumulators, one per bit position, and the sign applied as a
+/// sign-bit flip rather than a multiply: LLVM turns each code byte into one
+/// 8-wide xor and add.
+#[inline(always)]
+pub(crate) fn sign_dot_f32(q: &[f32], code: &[u8]) -> f32 {
+    let n = q.len().min(code.len() * 8);
+    let (qs, rest) = q[..n].as_chunks::<8>();
+    let mut acc = [0.0f32; 8];
+    for (qc, &byte) in qs.iter().zip(code) {
+        for t in 0..8 {
+            let flip = (!(u32::from(byte) >> t) & 1) << 31;
+            acc[t] += f32::from_bits(qc[t].to_bits() ^ flip);
+        }
+    }
+    let mut tail = 0.0f32;
+    if let Some(&byte) = code.get(qs.len()) {
+        for (t, &x) in rest.iter().enumerate() {
+            tail += if (byte >> t) & 1 == 1 { x } else { -x };
+        }
+    }
+    acc.iter().sum::<f32>() + tail
+}
+
 /// `Σ a[i] * (b[i] as f32)` over the common prefix.
 #[inline(always)]
 pub(crate) fn mixed_dot_u8_f32(a: &[f32], b: &[u8]) -> f32 {

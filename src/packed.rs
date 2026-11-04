@@ -1,25 +1,27 @@
-//! A packed corpus: pack the rows once, then score many queries against it.
+//! Packed rows: pack the rows once, then score many queries against them.
 //!
-//! [`Corpus`] stores `f32` rows contiguously, each row starting on a 64-byte
-//! boundary (from 16 dimensions up), and scores a query against every row
-//! inside one SIMD dispatch. Compared with calling a pair kernel per row:
+//! [`PackedRows`] stores rows contiguously (`f32` by default, `f64`, or `u8`
+//! binary codes), each float row starting on a 64-byte boundary from 16
+//! dimensions up and each byte row on a 16-byte boundary from 16 bytes, and
+//! scores a query against every row inside one SIMD dispatch. Compared with
+//! calling a pair kernel per row:
 //!
 //! - the backend is chosen once per call, not once per row (on x86 the
 //!   dispatch is a real call, which is most of the cost at small dimensions);
 //! - rows and the query are aligned, so wide loads never split across cache
 //!   lines (on AVX2 a buffer 16 bytes off a 32-byte boundary was 1.5x slower);
-//! - [`Corpus::top_k`] keeps the best `k` as it scans, without building a
+//! - [`PackedRows::top_k`] keeps the best `k` as it scans, without building a
 //!   score vector.
 //!
 //! The metric is a type parameter ([`crate::metric`]); its
 //! [`Direction`] decides whether larger or smaller scores rank first.
 //!
 //! ```
-//! use innr::corpus::Corpus;
+//! use innr::packed::PackedRows;
 //! use innr::metric::{Cosine, L2Sq};
 //!
 //! let rows = [[1.0_f32, 0.0], [0.0, 1.0], [0.7, 0.7]];
-//! let corpus = Corpus::from_rows(rows.iter().map(|r| r.as_slice()), 2).unwrap();
+//! let corpus = PackedRows::from_rows(rows.iter().map(|r| r.as_slice()), 2).unwrap();
 //!
 //! let best = corpus.top_k::<Cosine>(&[0.1, 1.0], 1);
 //! assert_eq!(best[0].index, 1);
@@ -32,7 +34,7 @@
 use crate::metric::{sealed::Kernel, Direction, Element, Metric};
 use crate::topk::TopK;
 
-/// One result of [`Corpus::top_k`]: a row and its score under the metric.
+/// One result of [`PackedRows::top_k`]: a row and its score under the metric.
 ///
 /// `S` is the metric's output: `f32` for `f32` rows, `u32` for Hamming and
 /// `u64` for the dot product over `u8` rows.
@@ -56,7 +58,7 @@ const fn align_bytes<T>() -> usize {
     }
 }
 
-/// Why [`Corpus::from_flat`] or [`Corpus::from_rows`] rejected its input.
+/// Why [`PackedRows::from_flat`] or [`PackedRows::from_rows`] rejected its input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackError {
@@ -83,14 +85,14 @@ pub enum PackError {
 impl core::fmt::Display for PackError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::ZeroDimension => write!(f, "innr::Corpus: dimension must be at least 1"),
+            Self::ZeroDimension => write!(f, "innr::PackedRows: dimension must be at least 1"),
             Self::NotMultipleOfDimension { len, dim } => write!(
                 f,
-                "innr::Corpus: flat length {len} is not a multiple of dimension {dim}"
+                "innr::PackedRows: flat length {len} is not a multiple of dimension {dim}"
             ),
             Self::RaggedRow { row, expected, got } => write!(
                 f,
-                "innr::Corpus: row {row} has {got} elements, expected {expected}"
+                "innr::PackedRows: row {row} has {got} elements, expected {expected}"
             ),
         }
     }
@@ -102,7 +104,7 @@ impl std::error::Error for PackError {}
 /// (byte-packed binary codes, scored with `Hamming`). See the
 /// [module docs](self).
 #[derive(Debug, Clone)]
-pub struct Corpus<T = f32> {
+pub struct PackedRows<T = f32> {
     /// Backing storage; rows start at `start` and are `stride` apart.
     buf: Vec<T>,
     start: usize,
@@ -137,7 +139,7 @@ fn aligned_zeroed<T: Copy + Default>(n: usize) -> (Vec<T>, usize) {
     (buf, start)
 }
 
-impl<T: Element + Default> Corpus<T> {
+impl<T: Element + Default> PackedRows<T> {
     /// Pack `len / dim` rows from a row-major buffer.
     ///
     /// # Errors
@@ -225,7 +227,7 @@ impl<T: Element + Default> Corpus<T> {
     pub fn row(&self, i: usize) -> &[T] {
         assert!(
             i < self.len,
-            "innr::Corpus: row {i} out of range ({})",
+            "innr::PackedRows: row {i} out of range ({})",
             self.len
         );
         let at = self.start + i * self.stride;
@@ -252,7 +254,7 @@ impl<T: Element + Default> Corpus<T> {
         out
     }
 
-    /// [`Corpus::scores`] into a caller-owned buffer, which is cleared first, so
+    /// [`PackedRows::scores`] into a caller-owned buffer, which is cleared first, so
     /// repeated scans reuse its allocation.
     ///
     /// # Panics
@@ -303,7 +305,7 @@ impl<T: Element + Default> Corpus<T> {
         self.for_each_portable::<M>(q, &mut f);
     }
 
-    /// [`Corpus::for_each_score`] for metrics that take per-row norms: the
+    /// [`PackedRows::for_each_score`] for metrics that take per-row norms: the
     /// rows' are computed once per corpus, the query's once per scan.
     fn for_each_normed<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
     where
@@ -351,7 +353,7 @@ impl<T: Element + Default> Corpus<T> {
     }
 }
 
-impl Corpus<f32> {
+impl PackedRows<f32> {
     /// The `k` best rows for `query`, best first.
     ///
     /// "Best" follows the metric's [`Direction`]: largest score for a
@@ -371,7 +373,7 @@ impl Corpus<f32> {
         self.top_k_aligned::<M>(q.as_slice(), k)
     }
 
-    /// [`Corpus::top_k`] for each query, in order.
+    /// [`PackedRows::top_k`] for each query, in order.
     ///
     /// # Panics
     ///
@@ -407,7 +409,7 @@ impl Corpus<f32> {
         let mut top = TopK::new(k.min(self.len));
         assert!(
             u32::try_from(self.len).is_ok(),
-            "innr::Corpus::top_k: more than u32::MAX rows"
+            "innr::PackedRows::top_k: more than u32::MAX rows"
         );
         self.for_each_score::<M>(q, |i, s| {
             top.insert(i as u32, if flip { -s } else { s });
@@ -422,7 +424,7 @@ impl Corpus<f32> {
     }
 }
 
-impl Corpus<u8> {
+impl PackedRows<u8> {
     /// The `k` best rows for `query` under a byte metric (`Hamming`, or `Dot`
     /// on `u8`), best first.
     ///
@@ -443,7 +445,7 @@ impl Corpus<u8> {
         self.top_k_aligned_int::<M>(q.as_slice(), k)
     }
 
-    /// [`Corpus::top_k`] for each query, in order.
+    /// [`PackedRows::top_k`] for each query, in order.
     ///
     /// # Panics
     ///
@@ -542,7 +544,7 @@ impl<T: Copy + Default> AlignedQuery<T> {
         assert_eq!(
             query.len(),
             self.dim,
-            "innr::Corpus: query has {} elements, corpus dimension is {}",
+            "innr::PackedRows: query has {} elements, corpus dimension is {}",
             query.len(),
             self.dim
         );
@@ -572,8 +574,8 @@ mod tests {
             .collect()
     }
 
-    fn pack(rows: &[Vec<f32>], dim: usize) -> Corpus {
-        Corpus::from_rows(rows.iter().map(Vec::as_slice), dim).unwrap()
+    fn pack(rows: &[Vec<f32>], dim: usize) -> PackedRows {
+        PackedRows::from_rows(rows.iter().map(Vec::as_slice), dim).unwrap()
     }
 
     /// `scan` must equal the metric applied per row (same kernels, same
@@ -588,7 +590,11 @@ mod tests {
                 let want: Vec<f32> = data.iter().map(|r| M::eval(q, r)).collect();
                 assert_eq!(got.len(), n);
                 for (i, (g, w)) in got.iter().zip(&want).enumerate() {
-                    let tol = 1e-5 * w.abs().max(1.0);
+                    // Packed rows are aligned and per-row inputs may not be,
+                    // so x86 sums them in different orders; bound by Σ|q·r|
+                    // (cosine's terms are at most 1 after normalization).
+                    let mag: f32 = q.iter().zip(&data[i]).map(|(x, y)| (x * y).abs()).sum();
+                    let tol = 1e-5 * w.abs().max(1.0) + (dim as f32 + 2.0) * f32::EPSILON * mag;
                     assert!((g - w).abs() <= tol, "dim={dim} n={n} row={i}: {g} vs {w}");
                 }
             }
@@ -643,7 +649,7 @@ mod tests {
         let data = rows(3, 8, 1);
         let corpus = pack(&data, 8);
         assert!(corpus.top_k::<Dot>(&data[0], 0).is_empty());
-        let empty = Corpus::from_rows(std::iter::empty::<&[f32]>(), 8).unwrap();
+        let empty = PackedRows::from_rows(std::iter::empty::<&[f32]>(), 8).unwrap();
         assert!(empty.is_empty());
         assert!(empty.top_k::<Dot>(&data[0], 3).is_empty());
         assert!(empty.scores::<Dot>(&data[0]).is_empty());
@@ -720,23 +726,23 @@ mod tests {
             assert_eq!(corpus.row(i), r.as_slice());
         }
         let flat: Vec<f32> = data.concat();
-        let from_flat = Corpus::from_flat(&flat, 20).unwrap();
+        let from_flat = PackedRows::from_flat(&flat, 20).unwrap();
         assert!(from_flat.rows().eq(corpus.rows()));
     }
 
     #[test]
     fn pack_rejects_bad_input() {
         assert_eq!(
-            Corpus::from_flat(&[1.0; 6], 0).unwrap_err(),
+            PackedRows::from_flat(&[1.0; 6], 0).unwrap_err(),
             PackError::ZeroDimension
         );
         assert_eq!(
-            Corpus::from_flat(&[1.0; 7], 3).unwrap_err(),
+            PackedRows::from_flat(&[1.0; 7], 3).unwrap_err(),
             PackError::NotMultipleOfDimension { len: 7, dim: 3 }
         );
         let ragged: [&[f32]; 2] = [&[1.0, 2.0], &[1.0]];
         assert_eq!(
-            Corpus::from_rows(ragged, 2).unwrap_err(),
+            PackedRows::from_rows(ragged, 2).unwrap_err(),
             PackError::RaggedRow {
                 row: 1,
                 expected: 2,
@@ -794,7 +800,7 @@ mod tests {
         for len in [1, 3, 15, 16, 17, 96, 128, 300, 2100] {
             for n in [0, 1, 5, 37] {
                 let data = codes(n, len, 7);
-                let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+                let corpus = PackedRows::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
                 let q = &codes(1, len, 99)[0];
                 let ham: Vec<u32> = data.iter().map(|r| crate::hamming_distance(q, r)).collect();
                 assert_eq!(corpus.scores::<Hamming>(q), ham, "len={len} n={n}");
@@ -811,7 +817,7 @@ mod tests {
         use crate::metric::Hamming;
         for len in [2, 16, 96] {
             let data = codes(60, len, 3);
-            let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+            let corpus = PackedRows::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
             let q = &codes(1, len, 41)[0];
             let ham = corpus.scores::<Hamming>(q);
             let mut by_ham: Vec<usize> = (0..ham.len()).collect();
@@ -836,7 +842,7 @@ mod tests {
     #[test]
     fn byte_top_k_breaks_ties_by_row() {
         use crate::metric::Hamming;
-        let corpus = Corpus::from_rows([[0u8; 4]; 9].iter().map(|r| r.as_slice()), 4).unwrap();
+        let corpus = PackedRows::from_rows([[0u8; 4]; 9].iter().map(|r| r.as_slice()), 4).unwrap();
         let hits = corpus.top_k::<Hamming>(&[0xFF; 4], 3);
         assert_eq!(
             hits.iter().map(|h| (h.index, h.score)).collect::<Vec<_>>(),
@@ -852,7 +858,7 @@ mod tests {
     fn byte_rows_are_aligned_from_16_bytes() {
         for len in [16, 17, 96, 100] {
             let data = codes(5, len, 2);
-            let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+            let corpus = PackedRows::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
             for (r, want) in corpus.rows().zip(&data) {
                 assert_eq!(r.as_ptr() as usize % 16, 0, "len={len}");
                 assert_eq!(r, want.as_slice());

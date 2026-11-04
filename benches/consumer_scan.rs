@@ -22,8 +22,8 @@ use std::hint::black_box;
 use criterion::measurement::WallTime;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, BenchmarkId, Criterion};
 use innr::batch::{batch_dot, VerticalBatch};
-use innr::corpus::Corpus;
 use innr::metric::Dot;
+use innr::packed::PackedRows;
 use innr::TopK;
 use innr_bench_support::data;
 
@@ -191,7 +191,7 @@ fn vicinity(c: &mut Criterion) {
                 cosine_distance_normalized_innr,
             )
         });
-        let packed = Corpus::from_flat(store, dim).unwrap();
+        let packed = PackedRows::from_flat(store, dim).unwrap();
         let q = &store[..dim];
         run(&mut g, &format!("{INNR}_corpus"), &p, || {
             // Dot ranks unit rows like the 1 - dot distance; skip the row itself.
@@ -265,7 +265,7 @@ fn topk_baselines(c: &mut Criterion) {
             run(&mut g, INNR, format!("{n}x{dim}"), || {
                 topk_exact(black_box(store), dim, black_box(&query), K)
             });
-            let packed = Corpus::from_flat(store, dim).unwrap();
+            let packed = PackedRows::from_flat(store, dim).unwrap();
             run(
                 &mut g,
                 &format!("{INNR}_corpus"),
@@ -325,7 +325,7 @@ fn topk_baselines(c: &mut Criterion) {
                         .map(|query| topk_exact(black_box(store), dim, query, K))
                         .collect::<Vec<_>>()
                 });
-                let packed = Corpus::from_flat(store, dim).unwrap();
+                let packed = PackedRows::from_flat(store, dim).unwrap();
                 run(
                     &mut g,
                     &format!("{INNR}_corpus"),

@@ -58,7 +58,7 @@ impl fmt::Display for Backend {
 /// portable kernel. The values were set from consumer-shape benchmarks on an
 /// Apple M3 (NEON); `hamming_u8` was also measured on x86_64 (AVX2) and is
 /// set per target. They apply to single calls; a packed
-/// [`Corpus`](crate::corpus::Corpus) scan dispatches once for all rows.
+/// [`PackedRows`](crate::packed::PackedRows) scan dispatches once for all rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Thresholds {

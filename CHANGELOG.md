@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.6
+
+### Changed
+
+- `innr::corpus::Corpus` is renamed `innr::packed::PackedRows`, matching
+  `PackedBinary` and `PackedTernary`: it packs rows (float vectors or byte
+  codes), and "corpus" suggested text documents. `innr::corpus::Corpus` stays
+  as a deprecated alias and `innr::corpus::{Hit, PackError}` as re-exports,
+  so 0.7.3 to 0.7.5 code compiles with a deprecation warning; they go in 0.8.
+- `dot` documents that its summation order depends on the dispatch level
+  and, on x86 from 512 elements, on the second argument's alignment, so
+  `dot(a, b)` and `dot(b, a)` can differ in the last bits (within
+  `(n + 2) · ε · Σ|a[i]·b[i]|`).
+
 ## 0.7.5
 
 ### Added

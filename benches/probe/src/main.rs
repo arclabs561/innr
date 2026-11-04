@@ -59,6 +59,20 @@ pub fn probe_slot_sketchir(a: &[u64], b: &[u64]) -> u64 {
     a.iter().zip(b.iter()).filter(|(x, y)| x != y).count() as u64
 }
 
+#[inline(never)]
+pub fn probe_hamming(a: &[u8], b: &[u8]) -> u32 {
+    innr::hamming_distance(a, b)
+}
+#[inline(never)]
+pub fn probe_hamming_portable(a: &[u8], b: &[u8]) -> u32 {
+    innr::quant::hamming_portable(a, b)
+}
+/// The byte loop most consumers write (and innr 0.6.3's portable kernel).
+#[inline(never)]
+pub fn probe_hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
+    a.iter().zip(b).map(|(&x, &y)| (x ^ y).count_ones()).sum()
+}
+
 /// A named variant: label and kernel.
 type Variant<'a, T, O> = (&'a str, fn(&[T], &[T]) -> O);
 
@@ -128,6 +142,18 @@ fn main() {
             pool(|s| data::f32s(d, s), 100),
         );
         row(&format!("cosine d={d}"), &cosine, &a, &b, 20_000_000);
+    }
+    let hamming: [Variant<'_, u8, u32>; 3] = [
+        ("innr", probe_hamming),
+        ("portable", probe_hamming_portable),
+        ("bytes", probe_hamming_bytes),
+    ];
+    for n in [16usize, 32, 96, 128, 256, 768, 2048] {
+        let (a, b) = (
+            pool(|s| data::bytes(n, s), 0),
+            pool(|s| data::bytes(n, s), 100),
+        );
+        row(&format!("hamming {n} B"), &hamming, &a, &b, 10_000_000);
     }
     let slot: [Variant<'_, u64, u64>; 2] =
         [("innr", probe_slot_u64), ("sketchir", probe_slot_sketchir)];

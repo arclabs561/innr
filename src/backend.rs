@@ -87,9 +87,15 @@ pub(crate) const THRESHOLDS: Thresholds = Thresholds {
     dense_f32: 16,
     dense_f64: 8,
     dot_u8: 32,
-    // SIMD measured no faster than the portable u64-word kernel up to 96 B,
-    // and about 1.35x faster from 128 B (2x at 512 B and up).
-    hamming_u8: 128,
+    // x86_64 (i7-8559U, AVX2): SIMD no faster than the portable u64-word
+    // kernel up to 96 B, faster from 128 B. aarch64 with dotprod (Apple M3): the portable
+    // byte loop compiles to cnt + udot and ties the SIMD kernel from 2 KiB,
+    // beating it below (128 B 7.7 vs 11.0 ns).
+    hamming_u8: if cfg!(all(target_arch = "aarch64", target_feature = "dotprod")) {
+        2048
+    } else {
+        128
+    },
     mixed_u8_f32: 16,
     slot_u16_u32: 8,
     slot_u64: None,
@@ -224,7 +230,12 @@ mod tests {
         assert!(line.starts_with(&caps.backend.to_string()), "{line}");
         assert!(line.contains("small path below: f32 16, f64 8"), "{line}");
         if caps.backend != Backend::Portable {
-            assert!(line.contains("hamming_u8 128 B"), "{line}");
+            let hamming = if cfg!(all(target_arch = "aarch64", target_feature = "dotprod")) {
+                "hamming_u8 2048 B"
+            } else {
+                "hamming_u8 128 B"
+            };
+            assert!(line.contains(hamming), "{line}");
             assert!(line.contains("slot_u64 never"), "{line}");
         }
     }

@@ -168,11 +168,35 @@ pub(crate) fn dot_u8_wide(a: &[u8], b: &[u8]) -> u64 {
 
 /// Number of differing bits between byte-packed bit vectors.
 ///
+/// With aarch64 `dotprod` (enabled on every Apple target), a plain byte loop
+/// over the 64-byte-multiple prefix: LLVM turns it into `cnt.16b` plus `udot`
+/// into four u32 accumulators, which the `u64` word kernel cannot match
+/// because each word's count needs its own widening chain (`cnt`, `udot`,
+/// `uaddlp.2d`). Apple M3, per call: 128 B 11.4 to 7.7 ns, 256 B 18.8 to
+/// 11.9 ns. The byte loop falls back to 8-byte vectors for a sub-64-byte
+/// rest, so the rest goes through the word kernel. Elsewhere the word kernel
+/// throughout: without `dotprod` the byte loop becomes a `uaddw` widening
+/// chain, and on x86-64 without POPCNT it is 4x slower (SWAR per byte).
+#[inline(always)]
+pub(crate) fn hamming(a: &[u8], b: &[u8]) -> u32 {
+    if cfg!(all(target_arch = "aarch64", target_feature = "dotprod")) {
+        let n = a.len().min(b.len());
+        let m = n / 64 * 64;
+        let head: u32 = a[..m]
+            .iter()
+            .zip(&b[..m])
+            .map(|(&x, &y)| (x ^ y).count_ones())
+            .sum();
+        return head + hamming_words(&a[m..n], &b[m..n]);
+    }
+    hamming_words(a, b)
+}
+
 /// XORs 64-bit words, four independent popcount accumulators per 32-byte
 /// block; `count_ones` on `u64` lowers to one `popcnt` (x86 with POPCNT) or
 /// `cnt` plus a pairwise add chain (NEON).
 #[inline(always)]
-pub(crate) fn hamming(a: &[u8], b: &[u8]) -> u32 {
+fn hamming_words(a: &[u8], b: &[u8]) -> u32 {
     const W: usize = 4;
     let n = a.len().min(b.len());
     let (ca, ra) = a[..n].as_chunks::<{ 8 * W }>();
@@ -221,7 +245,9 @@ mod tests {
 
     #[test]
     fn integer_kernels_cover_tails_and_flush() {
-        for n in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
+        for n in [
+            0usize, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100, 127, 128, 129, 200,
+        ] {
             let a: Vec<u8> = (0..n).map(|i| (i * 37 + 11) as u8).collect();
             let b: Vec<u8> = (0..n).map(|i| (i * 91 + 3) as u8).collect();
             let want: u64 = a

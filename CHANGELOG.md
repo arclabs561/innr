@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.9
+
+### Changed
+
+- `PackedRows` no longer copies each query into an aligned buffer (rows are
+  aligned at packing, which is where the measured gain was), and `f32`
+  selection rejects rows that lose to the current worst kept score with one
+  compare before `TopK`. Short scans gain most: i7-8559U, 16 B byte codes
+  0.86-0.89x to 1.05-1.14x per-code calls; top-1 against 1024 rows of 768
+  dims now ahead of a per-pair loop.
+
+### Added
+
+- `scan::top_k` and `scan::rerank` rank `f64` scores (NaN last), so `f64`
+  rows can be ranked, not only scored.
+
 ## 0.7.8
 
 ### Added

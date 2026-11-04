@@ -305,8 +305,8 @@ impl<T: Element + Default> PackedRows<T> {
     where
         M: Metric<T>,
     {
-        let q = self.prepare::<M>(query);
-        scan::scores_into::<M, T, Self>(q.as_slice(), self, out);
+        self.prepare::<M>(query);
+        scan::scores_into::<M, T, Self>(query, self, out);
     }
 
     /// The `k` best rows for `query`, best first.
@@ -325,8 +325,8 @@ impl<T: Element + Default> PackedRows<T> {
         M: Metric<T>,
         M::Output: Score,
     {
-        let q = self.prepare::<M>(query);
-        scan::top_k::<M, T, Self>(q.as_slice(), self, k)
+        self.prepare::<M>(query);
+        scan::top_k::<M, T, Self>(query, self, k)
     }
 
     /// [`PackedRows::top_k`] for each query, in order.
@@ -342,12 +342,11 @@ impl<T: Element + Default> PackedRows<T> {
         I: IntoIterator<Item = &'a [T]>,
     {
         self.prepare_norms::<M>();
-        let mut q = AlignedQuery::new(self.dim);
         queries
             .into_iter()
             .map(|query| {
-                q.load(query);
-                scan::top_k::<M, T, Self>(q.as_slice(), self, k)
+                self.check_query(query);
+                scan::top_k::<M, T, Self>(query, self, k)
             })
             .collect()
     }
@@ -373,15 +372,16 @@ impl<T: Element + Default> PackedRows<T> {
         M::Output: Score,
         I: IntoIterator<Item = usize>,
     {
-        let q = self.aligned_query(query);
-        scan::rerank::<M, T, Self, I>(q.as_slice(), self, candidates, k)
+        self.check_query(query);
+        scan::rerank::<M, T, Self, I>(query, self, candidates, k)
     }
 
-    /// Copy `query` into aligned storage after checking its length, and
-    /// compute the rows' norms first if `M` uses them.
-    fn prepare<M: Kernel<T>>(&self, query: &[T]) -> AlignedQuery<T> {
+    /// Check `query`'s length and compute the rows' norms first if `M`
+    /// uses them. The query is not copied: rows are aligned at packing, and
+    /// x86's alignment head follows the row argument.
+    fn prepare<M: Kernel<T>>(&self, query: &[T]) {
+        self.check_query(query);
         self.prepare_norms::<M>();
-        self.aligned_query(query)
     }
 
     /// Fill the stored row norms once, for metrics that use them.
@@ -392,11 +392,14 @@ impl<T: Element + Default> PackedRows<T> {
         }
     }
 
-    /// Copy `query` into aligned storage after checking its length.
-    fn aligned_query(&self, query: &[T]) -> AlignedQuery<T> {
-        let mut q = AlignedQuery::new(self.dim);
-        q.load(query);
-        q
+    fn check_query(&self, query: &[T]) {
+        assert_eq!(
+            query.len(),
+            self.dim,
+            "innr::PackedRows: query has {} elements, corpus dimension is {}",
+            query.len(),
+            self.dim
+        );
     }
 }
 
@@ -422,35 +425,6 @@ impl PackedRows<u8> {
     #[must_use]
     pub fn sign_dot_top_k(&self, query: &[f32], k: usize) -> Vec<Hit> {
         scan::sign_dot_top_k(query, self, k)
-    }
-}
-
-/// A query copied into storage aligned like the corpus rows.
-struct AlignedQuery<T> {
-    buf: Vec<T>,
-    start: usize,
-    dim: usize,
-}
-
-impl<T: Copy + Default> AlignedQuery<T> {
-    fn new(dim: usize) -> Self {
-        let (buf, start) = aligned_zeroed(dim);
-        Self { buf, start, dim }
-    }
-
-    fn load(&mut self, query: &[T]) {
-        assert_eq!(
-            query.len(),
-            self.dim,
-            "innr::PackedRows: query has {} elements, corpus dimension is {}",
-            query.len(),
-            self.dim
-        );
-        self.buf[self.start..self.start + self.dim].copy_from_slice(query);
-    }
-
-    fn as_slice(&self) -> &[T] {
-        &self.buf[self.start..self.start + self.dim]
     }
 }
 

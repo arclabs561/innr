@@ -191,6 +191,45 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     eval_unchecked::<f32, Cosine>(a, b)
 }
 
+/// The three sums behind a cosine, `(Σ a·b, Σ a², Σ b²)`, in one pass.
+///
+/// For callers with their own zero-norm or normalization rules: compute the
+/// cosine (or a distance) from these instead of calling [`dot`] three times,
+/// which reads both inputs three times. [`cosine`] finishes the same sums
+/// with innr's rules (0.0 when either norm is effectively zero, an `f64`
+/// fallback when the sums overflow).
+///
+/// # Panics
+///
+/// Panics if `a.len() != b.len()`.
+///
+/// ```rust
+/// use innr::cosine_parts;
+///
+/// let (ab, aa, bb) = cosine_parts(&[3.0, 4.0], &[3.0, 4.0]);
+/// assert_eq!((ab, aa, bb), (25.0, 25.0, 25.0));
+/// ```
+#[inline]
+#[must_use]
+pub fn cosine_parts(a: &[f32], b: &[f32]) -> (f32, f32, f32) {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "innr::cosine_parts: slice length mismatch ({} vs {})",
+        a.len(),
+        b.len()
+    );
+    #[cfg(feature = "simd")]
+    if a.len() >= crate::backend::THRESHOLDS.dense_f32 {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::cosine_parts_f32(s, a, b),
+            _ => crate::portable::cosine_parts_f32(a, b),
+        );
+    }
+    crate::portable::cosine_parts_f32(a, b)
+}
+
 /// Portable (non-SIMD) cosine similarity.
 ///
 /// Single-pass: accumulates dot(a,b), ||a||^2, ||b||^2 simultaneously, each
@@ -469,6 +508,27 @@ pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// cosine_parts equals the three separate sums (within rounding) on both
+    /// the portable and the dispatched lengths.
+    #[test]
+    fn cosine_parts_match_separate_sums() {
+        for n in [0usize, 3, 15, 16, 17, 64, 100, 768] {
+            let a: Vec<f32> = (0..n).map(|i| (i as f32 * 0.37).sin()).collect();
+            let b: Vec<f32> = (0..n).map(|i| (i as f32 * 0.91).cos()).collect();
+            let (ab, aa, bb) = cosine_parts(&a, &b);
+            let r = |x: &[f32], y: &[f32]| {
+                x.iter()
+                    .zip(y)
+                    .map(|(&p, &q)| f64::from(p) * f64::from(q))
+                    .sum::<f64>()
+            };
+            let tol = 1e-5 * (n as f64).max(1.0);
+            assert!((f64::from(ab) - r(&a, &b)).abs() <= tol, "ab n={n}");
+            assert!((f64::from(aa) - r(&a, &a)).abs() <= tol, "aa n={n}");
+            assert!((f64::from(bb) - r(&b, &b)).abs() <= tol, "bb n={n}");
+        }
+    }
 
     /// With `b` off its alignment, x86 peels a scalar head that depends on
     /// which argument is second, so `dot(a, b)` and `dot(b, a)` sum in

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.8
+
+### Added
+
+- `innr::scan`: `scores`, `scores_into`, `top_k`, `rerank`, `sign_dot_into`
+  and `sign_dot_top_k` over a `Rows` source, so callers keep their layout:
+  `[Vec<T>]`, `[&[T]]`, `[[T; N]]`, `scan::Flat` (a view of a row-major
+  buffer, no copy) or `PackedRows`. One dispatch per call. Integer metrics
+  rank exactly, `f32` puts NaN last.
+- `rerank`: exact scores for a candidate list, the second stage after a
+  cheap scan (for example `sign_dot_top_k` over binary codes of the same
+  rows). On `PackedRows` and as `scan::rerank`.
+- `cosine_parts(a, b)`: `(Σ a·b, Σ a², Σ b²)` in one pass, for callers with
+  their own zero-norm rules.
+
+### Changed
+
+- `PackedRows` methods run through `scan`; byte-code scans got faster on
+  x86_64 (i7-8559U, per row: 96 B 7.1 to 5.5 ns, 256 B 14.7 to 12.4 ns;
+  2.0x and 1.4x per-code calls). 16 B codes stay faster per call (0.86x).
+
 ## 0.7.7
 
 ### Added

@@ -131,6 +131,8 @@ pub mod batch;
 
 pub mod packed;
 
+pub mod scan;
+
 /// The 0.7.3 to 0.7.5 path of [`packed`], kept so existing code compiles.
 pub mod corpus {
     pub use crate::packed::{Hit, PackError};
@@ -158,7 +160,7 @@ mod maxsim;
 
 // Re-export core operations
 pub use dense::{
-    angular_distance, cosine, dot, l1_distance, l2_distance, l2_distance_squared,
+    angular_distance, cosine, cosine_parts, dot, l1_distance, l2_distance, l2_distance_squared,
     matryoshka_cosine, matryoshka_dot, norm, normalize, normalize_with_norm,
 };
 

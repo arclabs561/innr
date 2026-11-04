@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.7
+
+### Added
+
+- `binary::sign_dot(query, code)`: `Σ query[i] · (bit i of code ? +1 : -1)`,
+  bits LSB-first per byte, the asymmetric score of 1-bit (sign)
+  quantization with an `f32` query. `PackedRows<u8>::sign_dot_into` and
+  `sign_dot_top_k` scan packed codes in one dispatch. Against the usual
+  per-bit loop with one accumulator (qntz 0.3's), per code: Apple M3 4.5x
+  at 128 bits, 6.3 to 6.5x at 768 and 1536; i7-8559U 5.0x, 7.9 to 8.4x and
+  15.8x. On x86 the packed scan is up to 1.25x faster again at 128 bits.
+
 ## 0.7.6
 
 ### Changed

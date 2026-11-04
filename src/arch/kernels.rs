@@ -12,7 +12,7 @@
 //! portable kernels, so results agree to rounding, not bit for bit.
 
 use fearless_simd::{
-    Simd, SimdBase, SimdCvtFloat, SimdFloat, SimdInt, SimdIntWiden, SimdMask, SimdWiden,
+    Bytes, Simd, SimdBase, SimdCvtFloat, SimdFloat, SimdInt, SimdIntWiden, SimdMask, SimdWiden,
 };
 
 /// Independent vector accumulators in [`fold_float`]. Eight covers FMA
@@ -427,6 +427,101 @@ pub(crate) fn hamming_u8<S: Simd>(simd: S, a: &[u8], b: &[u8]) -> u32 {
     sum
 }
 
+/// `Σ q[i] · s[i]` with `s[i] = +1` for a set bit `i` of `code` (LSB-first
+/// per byte) and `-1` otherwise; see `portable::sign_dot_f32`.
+///
+/// Each chunk of `L` lanes takes its `L` code bits as one integer, ANDs a
+/// splat of it with the lane masks `1 << i`, and turns `(t - 1) & 0x8000_0000`
+/// into a sign flip: `t - 1` wraps to all ones exactly when the bit is clear.
+/// Integer and/sub/xor only, so it runs on every level (SSE2 has no
+/// per-lane variable shift).
+#[inline(always)]
+pub(crate) fn sign_dot_f32<S: Simd>(simd: S, q: &[f32], code: &[u8]) -> f32 {
+    let n = q.len().min(code.len() * 8);
+    let q = &q[..n];
+    let l = S::f32s::LEN;
+    debug_assert!(l <= 16, "sign_dot: lane masks are u32 bits");
+    let lane_bits: [u32; 16] = core::array::from_fn(|i| 1 << i);
+    let lanes = S::u32s::from_slice(simd, &lane_bits[..l]);
+    let one = S::u32s::splat(simd, 1);
+    let sign = S::u32s::splat(simd, 0x8000_0000);
+    let mask = u32::MAX >> (32 - l);
+    let z = S::f32s::splat(simd, 0.0);
+    let (mut a0, mut a1, mut a2, mut a3) = (z, z, z, z);
+    let mut base = 0;
+    let mut blocks = q.chunks_exact(4 * l);
+    for c in &mut blocks {
+        a0 += sign_chunk(simd, &c[..l], code_bits(code, base, mask), lanes, one, sign);
+        a1 += sign_chunk(
+            simd,
+            &c[l..2 * l],
+            code_bits(code, base + l, mask),
+            lanes,
+            one,
+            sign,
+        );
+        a2 += sign_chunk(
+            simd,
+            &c[2 * l..3 * l],
+            code_bits(code, base + 2 * l, mask),
+            lanes,
+            one,
+            sign,
+        );
+        a3 += sign_chunk(
+            simd,
+            &c[3 * l..],
+            code_bits(code, base + 3 * l, mask),
+            lanes,
+            one,
+            sign,
+        );
+        base += 4 * l;
+    }
+    let mut rest = blocks.remainder().chunks_exact(l);
+    for c in &mut rest {
+        a0 += sign_chunk(simd, c, code_bits(code, base, mask), lanes, one, sign);
+        base += l;
+    }
+    let mut sum = ((a0 + a1) + (a2 + a3)).reduce_sum();
+    for (i, &x) in rest.remainder().iter().enumerate() {
+        let idx = base + i;
+        sum += if (code[idx / 8] >> (idx % 8)) & 1 == 1 {
+            x
+        } else {
+            -x
+        };
+    }
+    sum
+}
+
+/// Code bits `base..base + width` (`mask` keeps `width` of them) as one
+/// integer; `base` is a multiple of the lane count, so they sit in at most two
+/// bytes. A function, not a closure, so it inlines into each SIMD level.
+#[inline(always)]
+fn code_bits(code: &[u8], base: usize, mask: u32) -> u32 {
+    let byte = base / 8;
+    let lo = u32::from(code[byte]);
+    let hi = code.get(byte + 1).map_or(0, |&b| u32::from(b));
+    ((lo | hi << 8) >> (base % 8)) & mask
+}
+
+/// `chunk` with lane `i` negated where bit `i` of `bits` is clear.
+#[inline(always)]
+fn sign_chunk<S: Simd>(
+    simd: S,
+    chunk: &[f32],
+    bits: u32,
+    lanes: S::u32s,
+    one: S::u32s,
+    sign: S::u32s,
+) -> S::f32s {
+    let t = S::u32s::splat(simd, bits) & lanes;
+    let flip = (t - one) & sign;
+    let x: S::u32s = S::f32s::from_slice(simd, chunk).bitcast();
+    (x ^ flip).bitcast()
+}
+
 /// Mixed-precision `Σ a[i] * (b[i] as f32)`.
 #[inline(always)]
 pub(crate) fn mixed_dot_u8_f32<S: Simd>(simd: S, a: &[f32], b: &[u8]) -> f32 {
@@ -685,6 +780,43 @@ mod tests {
     #[test]
     fn kernels_match_reference_on_native_level() {
         fearless_simd::dispatch!(Level::new(), s => check_level(s));
+    }
+
+    /// Both sign-dot kernels against an f64 oracle with the sign rule
+    /// written out, at every test length (tails inside a byte, across lane
+    /// chunks and across the four-accumulator block) and on every level.
+    fn check_sign_dot<S: Simd>(s: S) {
+        for &n in LENS {
+            let q = f32s(n, 3);
+            let code = u8s(n.div_ceil(8), 11);
+            let bit = |i: usize| (code[i / 8] >> (i % 8)) & 1 == 1;
+            let want: f64 = (0..n)
+                .map(|i| {
+                    if bit(i) {
+                        f64::from(q[i])
+                    } else {
+                        -f64::from(q[i])
+                    }
+                })
+                .sum();
+            let scale: f64 = q.iter().map(|&x| f64::from(x).abs()).sum();
+            let got = s.vectorize(|| sign_dot_f32(s, &q, &code));
+            assert!(
+                close(got.into(), want, scale, n),
+                "simd n={n}: {got} vs {want}"
+            );
+            let got = crate::portable::sign_dot_f32(&q, &code);
+            assert!(
+                close(got.into(), want, scale, n),
+                "portable n={n}: {got} vs {want}"
+            );
+        }
+    }
+
+    #[test]
+    fn sign_dot_matches_reference_on_every_level() {
+        check_sign_dot(Fallback::new());
+        fearless_simd::dispatch!(Level::new(), s => check_sign_dot(s));
     }
 
     #[test]

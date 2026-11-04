@@ -212,6 +212,52 @@ pub fn binary_jaccard(a: &PackedBinary, b: &PackedBinary) -> f32 {
     }
 }
 
+/// Dot product of an `f32` query with a sign-bit code: `Σ query[i] · s[i]`,
+/// where `s[i]` is `+1` if bit `i` of `code` is set and `-1` otherwise.
+///
+/// This is the asymmetric score of 1-bit (sign) quantization: the stored
+/// vectors keep one bit per dimension and the query stays in `f32`. Bits are
+/// LSB-first within each byte (`code[i / 8] >> (i % 8)`), so a code built
+/// with `code[i / 8] |= 1 << (i % 8)` for every positive coordinate matches.
+/// When `query.len()` is not a multiple of 8, the last byte's high bits are
+/// ignored.
+///
+/// For many codes against one query, pack them in
+/// [`PackedRows<u8>`](crate::packed::PackedRows) and call
+/// [`sign_dot_into`](crate::packed::PackedRows::sign_dot_into), which
+/// dispatches once per scan.
+///
+/// # Panics
+///
+/// Panics if `code` has fewer than `query.len().div_ceil(8)` bytes.
+///
+/// ```
+/// use innr::binary::sign_dot;
+///
+/// let q = [0.5_f32, -1.0, 2.0, 0.25];
+/// // bits 0 and 2 set: +0.5 - (-1.0) + 2.0 - 0.25
+/// assert_eq!(sign_dot(&q, &[0b0000_0101]), 0.5 + 1.0 + 2.0 - 0.25);
+/// ```
+#[must_use]
+#[inline]
+pub fn sign_dot(query: &[f32], code: &[u8]) -> f32 {
+    assert!(
+        code.len() * 8 >= query.len(),
+        "innr::sign_dot: code has {} bytes, query needs {}",
+        code.len(),
+        query.len().div_ceil(8)
+    );
+    #[cfg(feature = "simd")]
+    if query.len() >= crate::backend::THRESHOLDS.dense_f32 {
+        return crate::arch::simd_dispatch!(
+            crate::arch::isa(),
+            s => crate::arch::kernels::sign_dot_f32(s, query, code),
+            _ => crate::portable::sign_dot_f32(query, code),
+        );
+    }
+    crate::portable::sign_dot_f32(query, code)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -225,6 +271,35 @@ mod tests {
     }
 
     use super::*;
+
+    /// A code holding the sign of every query coordinate gives `Σ|q|`; its
+    /// complement gives `-Σ|q|`. Pins the LSB-first bit order.
+    #[test]
+    fn sign_dot_of_own_signs_is_l1_norm() {
+        for n in [1usize, 7, 8, 9, 31, 64, 100, 768] {
+            let q: Vec<f32> = (0..n).map(|i| (i as f32 * 0.37).sin()).collect();
+            let mut code = vec![0u8; n.div_ceil(8)];
+            for (i, &x) in q.iter().enumerate() {
+                if x > 0.0 {
+                    code[i / 8] |= 1 << (i % 8);
+                }
+            }
+            let l1: f32 = q.iter().map(|x| x.abs()).sum();
+            let tol = 1e-5 * l1.max(1.0);
+            assert!((sign_dot(&q, &code) - l1).abs() <= tol, "n={n}");
+            let flipped: Vec<u8> = code.iter().map(|b| !b).collect();
+            assert!(
+                (sign_dot(&q, &flipped) + l1).abs() <= tol,
+                "n={n} complement"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "innr::sign_dot: code has 1 bytes, query needs 2")]
+    fn sign_dot_rejects_short_code() {
+        let _ = sign_dot(&[1.0; 9], &[0]);
+    }
 
     #[test]
     fn test_binary_ops() {

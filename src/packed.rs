@@ -467,6 +467,78 @@ impl PackedRows<u8> {
             .collect()
     }
 
+    /// [`sign_dot`](crate::binary::sign_dot) of `query` against every code,
+    /// in row order, into a caller-owned buffer (cleared first), with one
+    /// SIMD dispatch for the whole scan.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a code is shorter than `query.len().div_ceil(8)` bytes,
+    /// that is, if `8 * self.dim() < query.len()`.
+    pub fn sign_dot_into(&self, query: &[f32], out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(self.len);
+        self.for_each_sign_dot(query, |_, s| out.push(s));
+    }
+
+    /// The `k` codes with the largest [`sign_dot`](crate::binary::sign_dot)
+    /// against `query`, best first; NaN scores rank last.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `8 * self.dim() < query.len()`.
+    #[must_use]
+    pub fn sign_dot_top_k(&self, query: &[f32], k: usize) -> Vec<Hit> {
+        let k = k.min(self.len);
+        if k == 0 {
+            return Vec::new();
+        }
+        assert!(
+            u32::try_from(self.len).is_ok(),
+            "innr::PackedRows::sign_dot_top_k: more than u32::MAX rows"
+        );
+        // TopK keeps the smallest keys: negate so the largest score ranks first.
+        let mut top = TopK::new(k);
+        self.for_each_sign_dot(query, |i, s| top.insert(i as u32, -s));
+        top.into_sorted()
+            .into_iter()
+            .map(|(i, s)| Hit {
+                index: i as usize,
+                score: -s,
+            })
+            .collect()
+    }
+
+    fn for_each_sign_dot(&self, query: &[f32], mut f: impl FnMut(usize, f32)) {
+        assert!(
+            self.dim * 8 >= query.len(),
+            "innr::PackedRows::sign_dot: codes have {} bytes, query needs {}",
+            self.dim,
+            query.len().div_ceil(8)
+        );
+        let row = |i: usize| &self.buf[self.start + i * self.stride..][..self.dim];
+        #[cfg(feature = "simd")]
+        if query.len() >= 8 {
+            crate::arch::simd_dispatch!(
+                crate::arch::isa(),
+                s => {
+                    for i in 0..self.len {
+                        f(i, crate::arch::kernels::sign_dot_f32(s, query, row(i)));
+                    }
+                },
+                _ => {
+                    for i in 0..self.len {
+                        f(i, crate::portable::sign_dot_f32(query, row(i)));
+                    }
+                },
+            );
+            return;
+        }
+        for i in 0..self.len {
+            f(i, crate::portable::sign_dot_f32(query, row(i)));
+        }
+    }
+
     fn top_k_aligned_int<M>(&self, q: &[u8], k: usize) -> Vec<Hit<M::Output>>
     where
         M: Metric<u8>,
@@ -852,6 +924,36 @@ mod tests {
             corpus.top_k_many::<Hamming, _>([[0xFFu8; 4].as_slice(), [0u8; 4].as_slice()], 2);
         assert_eq!(many[0], hits[..2]);
         assert_eq!(many[1].iter().map(|h| h.score).collect::<Vec<_>>(), [0, 0]);
+    }
+
+    /// A sign-dot scan equals per-code `sign_dot`; its top-k equals sorting
+    /// those scores descending.
+    #[test]
+    fn sign_dot_scan_matches_per_code_calls() {
+        for bits in [5usize, 64, 100, 768] {
+            let len = bits.div_ceil(8);
+            let data = codes(50, len, 13);
+            let packed = PackedRows::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+            let q = &rows(1, bits, 21)[0];
+            let want: Vec<f32> = data.iter().map(|c| crate::binary::sign_dot(q, c)).collect();
+            let mut got = Vec::new();
+            packed.sign_dot_into(q, &mut got);
+            for (g, w) in got.iter().zip(&want) {
+                assert!(
+                    (g - w).abs() <= 1e-4 * w.abs().max(1.0),
+                    "bits={bits}: {g} vs {w}"
+                );
+            }
+            // `codes` repeats rows at some lengths, so compare ranked scores
+            // (the f32 top-k does not order ties) and that each hit's score
+            // is its row's.
+            let mut sorted = got.clone();
+            sorted.sort_by(|a, b| b.total_cmp(a));
+            let top = packed.sign_dot_top_k(q, 7);
+            let scores: Vec<f32> = top.iter().map(|h| h.score).collect();
+            assert_eq!(scores, sorted[..7], "bits={bits}");
+            assert!(top.iter().all(|h| h.score == got[h.index]), "bits={bits}");
+        }
     }
 
     #[test]

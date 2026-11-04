@@ -30,6 +30,33 @@
 //! assert_eq!(nearest[0].index, 2);
 //! assert!(nearest[0].score < nearest[1].score);
 //! ```
+//!
+//! Two-stage search: score cheap sign-bit codes of every row, then rerank the
+//! best candidates exactly.
+//!
+//! ```
+//! use innr::metric::Cosine;
+//! use innr::packed::PackedRows;
+//!
+//! let rows = [[0.9_f32, 0.1, -0.2, 0.4], [-0.5, 0.8, 0.1, -0.3], [0.7, 0.2, -0.1, 0.6]];
+//! let sign_code = |r: &[f32]| {
+//!     let mut c = 0u8;
+//!     for (i, &x) in r.iter().enumerate() {
+//!         if x > 0.0 { c |= 1 << i; }
+//!     }
+//!     [c]
+//! };
+//! let codes: Vec<[u8; 1]> = rows.iter().map(|r| sign_code(r)).collect();
+//! let codes = PackedRows::from_rows(codes.iter().map(|c| c.as_slice()), 1).unwrap();
+//! let exact = PackedRows::from_rows(rows.iter().map(|r| r.as_slice()), 4).unwrap();
+//!
+//! // Rows 0 and 2 share a sign code, so the coarse stage keeps both; the
+//! // exact stage picks row 2, which equals the query.
+//! let q = [0.7_f32, 0.2, -0.1, 0.6];
+//! let candidates = codes.sign_dot_top_k(&q, 2);
+//! let best = exact.rerank::<Cosine, _>(&q, candidates.iter().map(|h| h.index), 1);
+//! assert_eq!(best[0].index, 2);
+//! ```
 
 use crate::metric::{sealed::Kernel, Direction, Element, Metric};
 use crate::topk::TopK;
@@ -305,6 +332,50 @@ impl<T: Element + Default> PackedRows<T> {
         self.for_each_portable::<M>(q, &mut f);
     }
 
+    /// `f(row, score)` for the listed rows only, in list order, with one
+    /// dispatch. Uses stored norms for `NORMED` metrics only if already
+    /// computed. Indices are checked by the caller.
+    fn for_each_score_at<M>(&self, q: &[T], ids: &[usize], mut f: impl FnMut(usize, M::Output))
+    where
+        M: Kernel<T>,
+    {
+        let row = |i: usize| &self.buf[self.start + i * self.stride..][..self.dim];
+        let norms = if M::NORMED { self.norms.get() } else { None };
+        let nq = norms.map(|_| M::row_norm(q).expect("innr: NORMED metric without row_norm"));
+        #[cfg(feature = "simd")]
+        if self.dim >= M::MIN_SCAN_LEN {
+            crate::arch::simd_dispatch!(
+                crate::arch::isa(),
+                s => {
+                    for &i in ids {
+                        let score = match (norms, nq) {
+                            (Some(n), Some(nq)) => M::simd_normed(s, q, row(i), nq, n[i]),
+                            _ => M::simd(s, q, row(i)),
+                        };
+                        f(i, score);
+                    }
+                },
+                _ => {
+                    for &i in ids {
+                        let score = match (norms, nq) {
+                            (Some(n), Some(nq)) => M::portable_normed(q, row(i), nq, n[i]),
+                            _ => M::portable(q, row(i)),
+                        };
+                        f(i, score);
+                    }
+                },
+            );
+            return;
+        }
+        for &i in ids {
+            let score = match (norms, nq) {
+                (Some(n), Some(nq)) => M::portable_normed(q, row(i), nq, n[i]),
+                _ => M::portable(q, row(i)),
+            };
+            f(i, score);
+        }
+    }
+
     /// [`PackedRows::for_each_score`] for metrics that take per-row norms: the
     /// rows' are computed once per corpus, the query's once per scan.
     fn for_each_normed<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
@@ -390,6 +461,51 @@ impl PackedRows<f32> {
             .map(|query| {
                 q.load(query);
                 self.top_k_aligned::<M>(q.as_slice(), k)
+            })
+            .collect()
+    }
+
+    /// The `k` best of `candidates` (row indices) for `query`, best first,
+    /// with the rows' own indices in the hits.
+    ///
+    /// The second stage of a two-stage search: take candidates from a cheap
+    /// scan (for example [`PackedRows::sign_dot_top_k`] over binary codes of
+    /// the same rows), then score only those exactly here, in one dispatch.
+    /// An index listed twice is scored twice. For cosine, stored row norms
+    /// are used if a full scan already computed them; a rerank alone does not
+    /// compute norms for every row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `query.len() != self.dim()` or a candidate is out of range.
+    #[must_use]
+    pub fn rerank<M, I>(&self, query: &[f32], candidates: I, k: usize) -> Vec<Hit>
+    where
+        M: Metric<f32, Output = f32>,
+        I: IntoIterator<Item = usize>,
+    {
+        let ids: Vec<usize> = candidates.into_iter().collect();
+        if let Some(&bad) = ids.iter().find(|&&i| i >= self.len) {
+            panic!(
+                "innr::PackedRows::rerank: candidate {bad} out of range ({})",
+                self.len
+            );
+        }
+        let k = k.min(ids.len());
+        if k == 0 {
+            return Vec::new();
+        }
+        let q = self.aligned_query(query);
+        let flip = matches!(M::DIRECTION, Direction::Similarity);
+        let mut top = TopK::new(k);
+        self.for_each_score_at::<M>(q.as_slice(), &ids, |i, s| {
+            top.insert(i as u32, if flip { -s } else { s });
+        });
+        top.into_sorted()
+            .into_iter()
+            .map(|(i, s)| Hit {
+                index: i as usize,
+                score: if flip { -s } else { s },
             })
             .collect()
     }
@@ -954,6 +1070,49 @@ mod tests {
             assert_eq!(scores, sorted[..7], "bits={bits}");
             assert!(top.iter().all(|h| h.score == got[h.index]), "bits={bits}");
         }
+    }
+
+    /// Reranking every row is top_k; reranking a subset is top_k over a
+    /// corpus of just those rows, with indices mapped back; cosine gives the
+    /// same hits before and after a full scan stores the row norms.
+    #[test]
+    fn rerank_matches_top_k_over_the_candidates() {
+        let dim = 48;
+        let data = rows(40, dim, 17);
+        let packed = pack(&data, dim);
+        let q = &rows(1, dim, 3)[0];
+        let all = packed.rerank::<L2Sq, _>(q, 0..40, 6);
+        assert_eq!(all, packed.top_k::<L2Sq>(q, 6));
+
+        let ids = [31usize, 2, 17, 8, 25, 39, 11];
+        let sub: Vec<Vec<f32>> = ids.iter().map(|&i| data[i].clone()).collect();
+        let want: Vec<(usize, f32)> = pack(&sub, dim)
+            .top_k::<Dot>(q, 4)
+            .iter()
+            .map(|h| (ids[h.index], h.score))
+            .collect();
+        let got: Vec<(usize, f32)> = packed
+            .rerank::<Dot, _>(q, ids, 4)
+            .iter()
+            .map(|h| (h.index, h.score))
+            .collect();
+        assert_eq!(got, want);
+
+        let before = packed.rerank::<Cosine, _>(q, ids, 4);
+        let _ = packed.scores::<Cosine>(q); // stores the norms
+        let after = packed.rerank::<Cosine, _>(q, ids, 4);
+        for (b, a) in before.iter().zip(&after) {
+            assert_eq!(b.index, a.index);
+            assert!((b.score - a.score).abs() <= 1e-5);
+        }
+        assert!(packed.rerank::<Dot, _>(q, [], 3).is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "candidate 40 out of range (40)")]
+    fn rerank_rejects_out_of_range_candidates() {
+        let packed = pack(&rows(40, 8, 1), 8);
+        let _ = packed.rerank::<Dot, _>(&[0.0; 8], [3, 40], 2);
     }
 
     #[test]

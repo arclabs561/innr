@@ -21,6 +21,12 @@ use crate::metric::{eval_unchecked, Cosine, Dot, L2Sq, L1};
 /// available level (AVX-512, AVX2+FMA, NEON, WASM SIMD128); otherwise runs
 /// the portable kernel.
 ///
+/// The summation order depends on the level and, on x86 from 512 elements,
+/// on where `b` sits in memory (a scalar head aligns it). The same values can
+/// therefore round differently in the last bits, within
+/// `(n + 2) · ε · Σ|a[i]·b[i]|`, and `dot(a, b)` need not equal `dot(b, a)`
+/// bit for bit.
+///
 /// # Panics
 ///
 /// Panics if `a.len() != b.len()`.
@@ -463,6 +469,47 @@ pub fn l2_distance_squared_portable(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With `b` off its alignment, x86 peels a scalar head that depends on
+    /// which argument is second, so `dot(a, b)` and `dot(b, a)` sum in
+    /// different orders. Both must stay within `(n + 2) · ε · Σ|a·b|` of the
+    /// f64 value, even where the result cancels to a small fraction of
+    /// that magnitude.
+    #[test]
+    fn dot_order_differences_stay_within_rounding_bound() {
+        let n = 768;
+        // Adjacent terms nearly cancel: a[2k+1]·b[2k+1] ≈ -a[2k]·b[2k].
+        let wave = |i: usize| (i as f32 * 0.618_034).fract() + 0.5; // in [0.5, 1.5)
+        let a: Vec<f32> = (0..n).map(|i| wave(i) * 1000.0).collect();
+        let mut buf = vec![0.0_f32; n + 1];
+        for k in 0..n / 2 {
+            let even = wave(n + k) * 1000.0;
+            buf[1 + 2 * k] = even;
+            buf[2 + 2 * k] = -a[2 * k] * even / a[2 * k + 1] * (1.0 + 1e-4 * wave(k));
+        }
+        let b = &buf[1..=n]; // one element off the allocation's alignment
+        let exact: f64 = a
+            .iter()
+            .zip(b)
+            .map(|(&x, &y)| f64::from(x) * f64::from(y))
+            .sum();
+        let mag: f64 = a
+            .iter()
+            .zip(b)
+            .map(|(&x, &y)| (f64::from(x) * f64::from(y)).abs())
+            .sum();
+        let bound = (n as f64 + 2.0) * f64::from(f32::EPSILON) * mag;
+        assert!(
+            exact.abs() < 0.01 * mag,
+            "inputs must cancel to test the bound"
+        );
+        for got in [dot(&a, b), dot(b, &a)] {
+            assert!(
+                (f64::from(got) - exact).abs() <= bound,
+                "{got} vs {exact}, bound {bound}"
+            );
+        }
+    }
 
     /// Entries large enough that the f32 sums overflow must still give the
     /// representable cosine, in both the SIMD and the portable lengths.
@@ -970,7 +1017,12 @@ mod proptests {
         fn dot_commutative((dim, a, b) in dim_and_two_vecs()) {
             let ab = dot(&a, &b);
             let ba = dot(&b, &a);
-            let tol = 1e-4 * ab.abs().max(ba.abs()).max(1.0);
+            // Rounding error scales with Σ|a·b|, not with the result, which
+            // can cancel to near zero; on x86 the two calls also sum in
+            // different orders (the alignment peel follows the second
+            // argument). Same bound as `accuracy.rs`.
+            let mag: f32 = a.iter().zip(&b).map(|(x, y)| (x * y).abs()).sum();
+            let tol = (dim as f32 + 2.0) * f32::EPSILON * mag.max(1.0);
             prop_assert!(
                 (ab - ba).abs() <= tol,
                 "dot commutativity failed: dot(a,b)={ab}, dot(b,a)={ba}, dim={dim}"

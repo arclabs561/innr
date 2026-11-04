@@ -590,7 +590,11 @@ mod tests {
                 let want: Vec<f32> = data.iter().map(|r| M::eval(q, r)).collect();
                 assert_eq!(got.len(), n);
                 for (i, (g, w)) in got.iter().zip(&want).enumerate() {
-                    let tol = 1e-5 * w.abs().max(1.0);
+                    // Packed rows are aligned and per-row inputs may not be,
+                    // so x86 sums them in different orders; bound by Σ|q·r|
+                    // (cosine's terms are at most 1 after normalization).
+                    let mag: f32 = q.iter().zip(&data[i]).map(|(x, y)| (x * y).abs()).sum();
+                    let tol = 1e-5 * w.abs().max(1.0) + (dim as f32 + 2.0) * f32::EPSILON * mag;
                     assert!((g - w).abs() <= tol, "dim={dim} n={n} row={i}: {g} vs {w}");
                 }
             }

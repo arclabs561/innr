@@ -86,8 +86,9 @@ let index = Hnsw::<u32, DistSlotU32>::new(16, 10_000, 16, 200, DistSlotU32);
 **Packed corpus**: `corpus::Corpus` packs `f32` rows once, each row aligned,
 and scores a query against every row in one SIMD dispatch, with top-k kept
 during the scan. For brute-force scans at 128 dimensions this measured
-1.2-2.4x faster than calling a pair kernel per row (more rows, larger gain);
-from 768 dimensions top-k costs the same either way.
+1.2-2.4x faster than calling a pair kernel per row (more rows, larger gain).
+Cosine scans keep each row's norm, so they cost one dot product per row:
+1.2-1.9x faster than per-row `cosine` on an i7-8559U.
 
 ```rust
 use innr::corpus::Corpus;
@@ -97,6 +98,21 @@ let rows = [[1.0_f32, 0.0], [0.0, 1.0], [0.7, 0.7]];
 let corpus = Corpus::from_rows(rows.iter().map(|r| r.as_slice()), 2).unwrap();
 let best = corpus.top_k::<Cosine>(&[0.1, 1.0], 1);
 assert_eq!(best[0].index, 1);
+```
+
+`Corpus<u8>` holds byte-packed binary codes and ranks `Hamming` exactly.
+On x86_64 it beat per-code `hamming_distance` calls by 1.3-1.5x from 96-byte
+codes up; below 32 bytes keep the per-code calls.
+
+```rust
+use innr::corpus::Corpus;
+use innr::metric::Hamming;
+
+let codes = [[0b1111_0000u8, 0], [0, 0], [0xFF, 0xFF]];
+let corpus = Corpus::from_rows(codes.iter().map(|c| c.as_slice()), 2).unwrap();
+let nearest = corpus.top_k::<Hamming>(&[0, 0], 2);
+assert_eq!((nearest[0].index, nearest[0].score), (1, 0));
+assert_eq!((nearest[1].index, nearest[1].score), (0, 4));
 ```
 
 ## SIMD Dispatch

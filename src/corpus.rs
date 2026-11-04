@@ -29,20 +29,32 @@
 //! assert!(nearest[0].score < nearest[1].score);
 //! ```
 
-use crate::metric::{sealed::Kernel, Direction, Metric};
+use crate::metric::{sealed::Kernel, Direction, Element, Metric};
 use crate::topk::TopK;
 
 /// One result of [`Corpus::top_k`]: a row and its score under the metric.
+///
+/// `S` is the metric's output: `f32` for `f32` rows, `u32` for Hamming and
+/// `u64` for the dot product over `u8` rows.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Hit {
+pub struct Hit<S = f32> {
     /// Index of the row in the corpus.
     pub index: usize,
     /// The metric's value for the query and this row.
-    pub score: f32,
+    pub score: S,
 }
 
-/// Row stride and buffer alignment, in `f32` elements (64 bytes).
-const ALIGN: usize = 16;
+/// Row and buffer alignment in bytes. 64 (a cache line; an AVX-512 vector)
+/// for float rows. 16 for byte rows: binary codes are often 16 to 128 bytes,
+/// below the byte kernels' SIMD thresholds, where 64-byte padding would
+/// multiply memory for no gain.
+const fn align_bytes<T>() -> usize {
+    if core::mem::size_of::<T>() == 1 {
+        16
+    } else {
+        64
+    }
+}
 
 /// Why [`Corpus::from_flat`] or [`Corpus::from_rows`] rejected its input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,44 +98,53 @@ impl core::fmt::Display for PackError {
 
 impl std::error::Error for PackError {}
 
-/// `f32` rows packed for repeated scoring. See the [module docs](self).
+/// Rows packed for repeated scoring: `f32` by default, or `f64` or `u8`
+/// (byte-packed binary codes, scored with `Hamming`). See the
+/// [module docs](self).
 #[derive(Debug, Clone)]
-pub struct Corpus {
+pub struct Corpus<T = f32> {
     /// Backing storage; rows start at `start` and are `stride` apart.
-    buf: Vec<f32>,
+    buf: Vec<T>,
     start: usize,
     stride: usize,
     dim: usize,
     len: usize,
+    /// Per-row values for metrics that use them (cosine: squared norms),
+    /// filled on the first such scan.
+    norms: std::sync::OnceLock<Vec<T>>,
 }
 
-/// Elements between consecutive rows: the dimension rounded up to 64 bytes
-/// from 16 dimensions up. Below that the SIMD kernels do not run and padding
-/// would multiply the memory for little gain.
-fn stride_for(dim: usize) -> usize {
-    if dim >= ALIGN {
-        dim.div_ceil(ALIGN) * ALIGN
+/// Elements between consecutive rows: the row rounded up to the alignment
+/// once it is at least that long (16 `f32`, 16 bytes). Shorter rows stay
+/// unpadded: the SIMD kernels do not run on them and padding would multiply
+/// the memory.
+fn stride_for<T>(dim: usize) -> usize {
+    let align = align_bytes::<T>() / core::mem::size_of::<T>();
+    if dim >= align {
+        dim.div_ceil(align) * align
     } else {
         dim
     }
 }
 
-/// A zeroed buffer of `n` elements whose element `start` is 64-byte aligned.
-fn aligned_zeroed(n: usize) -> (Vec<f32>, usize) {
-    let buf = vec![0.0_f32; n + ALIGN];
-    let misalign = buf.as_ptr() as usize % (ALIGN * 4);
-    let start = (ALIGN * 4 - misalign) % (ALIGN * 4) / 4;
+/// A zeroed buffer of `n` elements whose element `start` is aligned to
+/// [`align_bytes`].
+fn aligned_zeroed<T: Copy + Default>(n: usize) -> (Vec<T>, usize) {
+    let (bytes, size) = (align_bytes::<T>(), core::mem::size_of::<T>());
+    let buf = vec![T::default(); n + bytes / size];
+    let misalign = buf.as_ptr() as usize % bytes;
+    let start = (bytes - misalign) % bytes / size;
     (buf, start)
 }
 
-impl Corpus {
+impl<T: Element + Default> Corpus<T> {
     /// Pack `len / dim` rows from a row-major buffer.
     ///
     /// # Errors
     ///
     /// [`PackError::ZeroDimension`] if `dim == 0`;
     /// [`PackError::NotMultipleOfDimension`] if `data.len() % dim != 0`.
-    pub fn from_flat(data: &[f32], dim: usize) -> Result<Self, PackError> {
+    pub fn from_flat(data: &[T], dim: usize) -> Result<Self, PackError> {
         if dim == 0 {
             return Err(PackError::ZeroDimension);
         }
@@ -144,12 +165,12 @@ impl Corpus {
     /// for the first row whose length is not `dim`.
     pub fn from_rows<'a, I>(rows: I, dim: usize) -> Result<Self, PackError>
     where
-        I: IntoIterator<Item = &'a [f32]>,
+        I: IntoIterator<Item = &'a [T]>,
     {
         if dim == 0 {
             return Err(PackError::ZeroDimension);
         }
-        let rows: Vec<&[f32]> = rows.into_iter().collect();
+        let rows: Vec<&[T]> = rows.into_iter().collect();
         if let Some((row, r)) = rows.iter().enumerate().find(|(_, r)| r.len() != dim) {
             return Err(PackError::RaggedRow {
                 row,
@@ -157,7 +178,7 @@ impl Corpus {
                 got: r.len(),
             });
         }
-        let stride = stride_for(dim);
+        let stride = stride_for::<T>(dim);
         let (mut buf, start) = aligned_zeroed(rows.len() * stride);
         for (i, r) in rows.iter().enumerate() {
             let at = start + i * stride;
@@ -169,6 +190,7 @@ impl Corpus {
             stride,
             dim,
             len: rows.len(),
+            norms: std::sync::OnceLock::new(),
         })
     }
 
@@ -200,7 +222,7 @@ impl Corpus {
     /// Panics if `i >= self.len()`.
     #[inline]
     #[must_use]
-    pub fn row(&self, i: usize) -> &[f32] {
+    pub fn row(&self, i: usize) -> &[T] {
         assert!(
             i < self.len,
             "innr::Corpus: row {i} out of range ({})",
@@ -211,7 +233,7 @@ impl Corpus {
     }
 
     /// The rows in order.
-    pub fn rows(&self) -> impl ExactSizeIterator<Item = &[f32]> + '_ {
+    pub fn rows(&self) -> impl ExactSizeIterator<Item = &[T]> + '_ {
         (0..self.len).map(|i| self.row(i))
     }
 
@@ -221,9 +243,9 @@ impl Corpus {
     ///
     /// Panics if `query.len() != self.dim()`.
     #[must_use]
-    pub fn scores<M>(&self, query: &[f32]) -> Vec<f32>
+    pub fn scores<M>(&self, query: &[T]) -> Vec<M::Output>
     where
-        M: Metric<f32, Output = f32>,
+        M: Metric<T>,
     {
         let mut out = Vec::with_capacity(self.len);
         self.scores_into::<M>(query, &mut out);
@@ -236,9 +258,9 @@ impl Corpus {
     /// # Panics
     ///
     /// Panics if `query.len() != self.dim()`.
-    pub fn scores_into<M>(&self, query: &[f32], out: &mut Vec<f32>)
+    pub fn scores_into<M>(&self, query: &[T], out: &mut Vec<M::Output>)
     where
-        M: Metric<f32, Output = f32>,
+        M: Metric<T>,
     {
         out.clear();
         out.reserve(self.len);
@@ -246,6 +268,90 @@ impl Corpus {
         self.for_each_score::<M>(q.as_slice(), |_, s| out.push(s));
     }
 
+    /// Copy `query` into aligned storage after checking its length.
+    fn aligned_query(&self, query: &[T]) -> AlignedQuery<T> {
+        let mut q = AlignedQuery::new(self.dim);
+        q.load(query);
+        q
+    }
+
+    /// Call `f(row, score)` for every row, with one SIMD dispatch for the
+    /// whole corpus.
+    #[inline]
+    fn for_each_score<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
+    where
+        M: Kernel<T>,
+    {
+        debug_assert_eq!(q.len(), self.dim);
+        if M::NORMED {
+            return self.for_each_normed::<M>(q, f);
+        }
+        #[cfg(feature = "simd")]
+        if self.dim >= M::MIN_SCAN_LEN {
+            crate::arch::simd_dispatch!(
+                crate::arch::isa(),
+                s => {
+                    for i in 0..self.len {
+                        let at = self.start + i * self.stride;
+                        f(i, M::simd(s, q, &self.buf[at..at + self.dim]));
+                    }
+                },
+                _ => self.for_each_portable::<M>(q, &mut f),
+            );
+            return;
+        }
+        self.for_each_portable::<M>(q, &mut f);
+    }
+
+    /// [`Corpus::for_each_score`] for metrics that take per-row norms: the
+    /// rows' are computed once per corpus, the query's once per scan.
+    fn for_each_normed<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
+    where
+        M: Kernel<T>,
+    {
+        let norm = |r: &[T]| M::row_norm(r).expect("innr: NORMED metric without row_norm");
+        let norms = self.norms.get_or_init(|| self.rows().map(norm).collect());
+        let nq = norm(q);
+        #[cfg(feature = "simd")]
+        if self.dim >= M::MIN_SCAN_LEN {
+            crate::arch::simd_dispatch!(
+                crate::arch::isa(),
+                s => {
+                    for (i, &nr) in norms.iter().enumerate() {
+                        let at = self.start + i * self.stride;
+                        f(i, M::simd_normed(s, q, &self.buf[at..at + self.dim], nq, nr));
+                    }
+                },
+                _ => {
+                    for (i, &nr) in norms.iter().enumerate() {
+                        let at = self.start + i * self.stride;
+                        f(i, M::portable_normed(q, &self.buf[at..at + self.dim], nq, nr));
+                    }
+                },
+            );
+            return;
+        }
+        for (i, &nr) in norms.iter().enumerate() {
+            let at = self.start + i * self.stride;
+            f(
+                i,
+                M::portable_normed(q, &self.buf[at..at + self.dim], nq, nr),
+            );
+        }
+    }
+
+    fn for_each_portable<M>(&self, q: &[T], f: &mut impl FnMut(usize, M::Output))
+    where
+        M: Kernel<T>,
+    {
+        for i in 0..self.len {
+            let at = self.start + i * self.stride;
+            f(i, M::portable(q, &self.buf[at..at + self.dim]));
+        }
+    }
+}
+
+impl Corpus<f32> {
     /// The `k` best rows for `query`, best first.
     ///
     /// "Best" follows the metric's [`Direction`]: largest score for a
@@ -314,64 +420,125 @@ impl Corpus {
             })
             .collect()
     }
+}
 
-    /// Copy `query` into 64-byte-aligned storage after checking its length.
-    fn aligned_query(&self, query: &[f32]) -> AlignedQuery {
+impl Corpus<u8> {
+    /// The `k` best rows for `query` under a byte metric (`Hamming`, or `Dot`
+    /// on `u8`), best first.
+    ///
+    /// Scores are integers and rank exactly, ties by row order. Returns fewer
+    /// than `k` hits only when the corpus has fewer than `k` rows, and
+    /// nothing when `k == 0`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `query.len() != self.dim()`.
+    #[must_use]
+    pub fn top_k<M>(&self, query: &[u8], k: usize) -> Vec<Hit<M::Output>>
+    where
+        M: Metric<u8>,
+        M::Output: Ord,
+    {
+        let q = self.aligned_query(query);
+        self.top_k_aligned_int::<M>(q.as_slice(), k)
+    }
+
+    /// [`Corpus::top_k`] for each query, in order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any query's length differs from `self.dim()`.
+    #[must_use]
+    pub fn top_k_many<'a, M, I>(&self, queries: I, k: usize) -> Vec<Vec<Hit<M::Output>>>
+    where
+        M: Metric<u8>,
+        M::Output: Ord,
+        I: IntoIterator<Item = &'a [u8]>,
+    {
         let mut q = AlignedQuery::new(self.dim);
-        q.load(query);
-        q
+        queries
+            .into_iter()
+            .map(|query| {
+                q.load(query);
+                self.top_k_aligned_int::<M>(q.as_slice(), k)
+            })
+            .collect()
     }
 
-    /// Call `f(row, score)` for every row, with one SIMD dispatch for the
-    /// whole corpus.
-    #[inline]
-    fn for_each_score<M>(&self, q: &[f32], mut f: impl FnMut(usize, f32))
+    fn top_k_aligned_int<M>(&self, q: &[u8], k: usize) -> Vec<Hit<M::Output>>
     where
-        M: Kernel<f32, Output = f32>,
+        M: Metric<u8>,
+        M::Output: Ord,
     {
-        debug_assert_eq!(q.len(), self.dim);
-        #[cfg(feature = "simd")]
-        if self.dim >= M::MIN_SIMD_LEN {
-            crate::arch::simd_dispatch!(
-                crate::arch::isa(),
-                s => {
-                    for i in 0..self.len {
-                        let at = self.start + i * self.stride;
-                        f(i, M::simd(s, q, &self.buf[at..at + self.dim]));
+        let k = k.min(self.len);
+        if k == 0 {
+            return Vec::new();
+        }
+        // A max-heap of the k best seen so far, keyed so its top is the
+        // worst kept hit: (score, row) for a distance, (Reverse(score), row)
+        // for a similarity. The row breaks ties toward the earlier row.
+        use core::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let mut hits: Vec<Hit<M::Output>> = match M::DIRECTION {
+            Direction::Distance => {
+                let mut heap = BinaryHeap::with_capacity(k + 1);
+                self.for_each_score::<M>(q, |i, s| {
+                    if heap.len() < k {
+                        heap.push((s, i));
+                    } else if let Some(&(worst, _)) = heap.peek() {
+                        if s < worst {
+                            heap.pop();
+                            heap.push((s, i));
+                        }
                     }
-                },
-                _ => self.for_each_portable::<M>(q, &mut f),
-            );
-            return;
+                });
+                heap.into_iter()
+                    .map(|(score, index)| Hit { index, score })
+                    .collect()
+            }
+            Direction::Similarity => {
+                let mut heap = BinaryHeap::with_capacity(k + 1);
+                self.for_each_score::<M>(q, |i, s| {
+                    if heap.len() < k {
+                        heap.push((Reverse(s), i));
+                    } else if let Some(&(Reverse(worst), _)) = heap.peek() {
+                        if s > worst {
+                            heap.pop();
+                            heap.push((Reverse(s), i));
+                        }
+                    }
+                });
+                heap.into_iter()
+                    .map(|(Reverse(score), index)| Hit { index, score })
+                    .collect()
+            }
+        };
+        match M::DIRECTION {
+            Direction::Distance => {
+                hits.sort_by(|a, b| a.score.cmp(&b.score).then(a.index.cmp(&b.index)))
+            }
+            Direction::Similarity => {
+                hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.index.cmp(&b.index)))
+            }
         }
-        self.for_each_portable::<M>(q, &mut f);
-    }
-
-    fn for_each_portable<M>(&self, q: &[f32], f: &mut impl FnMut(usize, f32))
-    where
-        M: Kernel<f32, Output = f32>,
-    {
-        for i in 0..self.len {
-            let at = self.start + i * self.stride;
-            f(i, M::portable(q, &self.buf[at..at + self.dim]));
-        }
+        hits
     }
 }
 
-/// A query copied into 64-byte-aligned storage.
-struct AlignedQuery {
-    buf: Vec<f32>,
+/// A query copied into storage aligned like the corpus rows.
+struct AlignedQuery<T> {
+    buf: Vec<T>,
     start: usize,
     dim: usize,
 }
 
-impl AlignedQuery {
+impl<T: Copy + Default> AlignedQuery<T> {
     fn new(dim: usize) -> Self {
         let (buf, start) = aligned_zeroed(dim);
         Self { buf, start, dim }
     }
 
-    fn load(&mut self, query: &[f32]) {
+    fn load(&mut self, query: &[T]) {
         assert_eq!(
             query.len(),
             self.dim,
@@ -382,7 +549,7 @@ impl AlignedQuery {
         self.buf[self.start..self.start + self.dim].copy_from_slice(query);
     }
 
-    fn as_slice(&self) -> &[f32] {
+    fn as_slice(&self) -> &[T] {
         &self.buf[self.start..self.start + self.dim]
     }
 }
@@ -583,5 +750,113 @@ mod tests {
     fn scores_rejects_wrong_query_length() {
         let corpus = pack(&rows(2, 4, 1), 4);
         let _ = corpus.scores::<Dot>(&[1.0, 2.0, 3.0]);
+    }
+
+    /// Cosine scans reuse the stored row norms; overflowing squared norms
+    /// still reach the f64 fallback; zero rows still score 0.
+    #[test]
+    fn cosine_with_stored_norms_matches_per_row() {
+        for dim in [8, 64, 300] {
+            let mut data = rows(12, dim, 5);
+            data[3].iter_mut().for_each(|x| *x *= 1e20); // squares overflow f32
+            data[7].iter_mut().for_each(|x| *x = 0.0);
+            let corpus = pack(&data, dim);
+            let q = &rows(1, dim, 77)[0];
+            let want: Vec<f32> = data.iter().map(|r| Cosine::eval(q, r)).collect();
+            for _ in 0..2 {
+                let got = corpus.scores::<Cosine>(q);
+                for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                    assert!((g - w).abs() <= 1e-5, "dim={dim} row={i}: {g} vs {w}");
+                }
+            }
+            assert!(want[3].is_finite() && want[3].abs() <= 1.0);
+            assert_eq!(corpus.scores::<Cosine>(q)[7], 0.0);
+            let _ = corpus.scores::<Dot>(q);
+            assert_eq!(corpus.top_k::<Cosine>(q, 3), corpus.top_k::<Cosine>(q, 3));
+        }
+    }
+
+    fn codes(n: usize, len: usize, seed: u32) -> Vec<Vec<u8>> {
+        (0..n)
+            .map(|r| {
+                (0..len)
+                    .map(|i| (((r * len + i) as u32).wrapping_mul(2654435761) ^ seed) as u8)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Byte rows score exactly like the per-row functions, across the
+    /// padding (16 B) and SIMD thresholds (128 B, 2048 B on Apple).
+    #[test]
+    fn byte_scores_match_per_row_functions() {
+        use crate::metric::Hamming;
+        for len in [1, 3, 15, 16, 17, 96, 128, 300, 2100] {
+            for n in [0, 1, 5, 37] {
+                let data = codes(n, len, 7);
+                let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+                let q = &codes(1, len, 99)[0];
+                let ham: Vec<u32> = data.iter().map(|r| crate::hamming_distance(q, r)).collect();
+                assert_eq!(corpus.scores::<Hamming>(q), ham, "len={len} n={n}");
+                let dot: Vec<u64> = data.iter().map(|r| crate::dot_u8_wide(q, r)).collect();
+                assert_eq!(corpus.scores::<Dot>(q), dot, "len={len} n={n}");
+            }
+        }
+    }
+
+    /// Byte top_k equals sorting every score by (score, row): ascending for
+    /// Hamming, descending for the dot product.
+    #[test]
+    fn byte_top_k_matches_sorted_scores() {
+        use crate::metric::Hamming;
+        for len in [2, 16, 96] {
+            let data = codes(60, len, 3);
+            let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+            let q = &codes(1, len, 41)[0];
+            let ham = corpus.scores::<Hamming>(q);
+            let mut by_ham: Vec<usize> = (0..ham.len()).collect();
+            by_ham.sort_by_key(|&i| (ham[i], i));
+            let dot = corpus.scores::<Dot>(q);
+            let mut by_dot: Vec<usize> = (0..dot.len()).collect();
+            by_dot.sort_by_key(|&i| (core::cmp::Reverse(dot[i]), i));
+            for k in [0, 1, 7, 60, 90] {
+                let got: Vec<usize> = corpus
+                    .top_k::<Hamming>(q, k)
+                    .iter()
+                    .map(|h| h.index)
+                    .collect();
+                assert_eq!(got, by_ham[..k.min(60)], "hamming len={len} k={k}");
+                let got: Vec<usize> = corpus.top_k::<Dot>(q, k).iter().map(|h| h.index).collect();
+                assert_eq!(got, by_dot[..k.min(60)], "dot len={len} k={k}");
+            }
+        }
+    }
+
+    /// Equal scores keep the earliest rows, in row order.
+    #[test]
+    fn byte_top_k_breaks_ties_by_row() {
+        use crate::metric::Hamming;
+        let corpus = Corpus::from_rows([[0u8; 4]; 9].iter().map(|r| r.as_slice()), 4).unwrap();
+        let hits = corpus.top_k::<Hamming>(&[0xFF; 4], 3);
+        assert_eq!(
+            hits.iter().map(|h| (h.index, h.score)).collect::<Vec<_>>(),
+            [(0, 32), (1, 32), (2, 32)]
+        );
+        let many =
+            corpus.top_k_many::<Hamming, _>([[0xFFu8; 4].as_slice(), [0u8; 4].as_slice()], 2);
+        assert_eq!(many[0], hits[..2]);
+        assert_eq!(many[1].iter().map(|h| h.score).collect::<Vec<_>>(), [0, 0]);
+    }
+
+    #[test]
+    fn byte_rows_are_aligned_from_16_bytes() {
+        for len in [16, 17, 96, 100] {
+            let data = codes(5, len, 2);
+            let corpus = Corpus::from_rows(data.iter().map(Vec::as_slice), len).unwrap();
+            for (r, want) in corpus.rows().zip(&data) {
+                assert_eq!(r.as_ptr() as usize % 16, 0, "len={len}");
+                assert_eq!(r, want.as_slice());
+            }
+        }
     }
 }

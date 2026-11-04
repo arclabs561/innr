@@ -129,6 +129,11 @@ pub(crate) mod sealed {
         /// Shortest input for which the SIMD kernel beats the portable one.
         const MIN_SIMD_LEN: usize;
 
+        /// [`Kernel::MIN_SIMD_LEN`] inside one dispatch for many rows (a
+        /// corpus scan), where the per-call dispatch cost is paid once per
+        /// scan instead of once per pair.
+        const MIN_SCAN_LEN: usize = Self::MIN_SIMD_LEN;
+
         /// Portable kernel; compares the common prefix of `a` and `b`.
         fn portable(a: &[T], b: &[T]) -> Self::Output;
 
@@ -136,6 +141,38 @@ pub(crate) mod sealed {
         /// `#[inline(always)]` so they compile with the level's features.
         #[cfg(feature = "simd")]
         fn simd<S: fearless_simd::Simd>(simd: S, a: &[T], b: &[T]) -> Self::Output;
+
+        /// Whether a packed corpus should keep each row's [`Kernel::row_norm`]
+        /// and score with the `_normed` kernels, which take both norms instead
+        /// of recomputing them per pair (cosine: one dot product per row
+        /// instead of three sums).
+        const NORMED: bool = false;
+
+        /// The per-row value the `_normed` kernels take; `None` unless
+        /// [`Kernel::NORMED`].
+        #[inline]
+        fn row_norm(_row: &[T]) -> Option<T> {
+            None
+        }
+
+        /// [`Kernel::portable`] given `row_norm(a)` and `row_norm(b)`.
+        #[inline]
+        fn portable_normed(a: &[T], b: &[T], _na: T, _nb: T) -> Self::Output {
+            Self::portable(a, b)
+        }
+
+        /// [`Kernel::simd`] given `row_norm(a)` and `row_norm(b)`.
+        #[cfg(feature = "simd")]
+        #[inline(always)]
+        fn simd_normed<S: fearless_simd::Simd>(
+            simd: S,
+            a: &[T],
+            b: &[T],
+            _na: T,
+            _nb: T,
+        ) -> Self::Output {
+            Self::simd(simd, a, b)
+        }
     }
 }
 
@@ -264,6 +301,22 @@ impl Kernel<f32> for Cosine {
         let (ab, aa, bb) = kernels::cosine_parts_f32(simd, a, b);
         dense::finish_cosine(a, b, ab, aa, bb)
     }
+
+    const NORMED: bool = true;
+    /// Squared norm, so a scan computes it once per row and once per query.
+    #[inline]
+    fn row_norm(row: &[f32]) -> Option<f32> {
+        Some(eval_unchecked::<f32, Dot>(row, row))
+    }
+    #[inline]
+    fn portable_normed(a: &[f32], b: &[f32], aa: f32, bb: f32) -> f32 {
+        dense::finish_cosine(a, b, dense::dot_portable(a, b), aa, bb)
+    }
+    #[cfg(feature = "simd")]
+    #[inline(always)]
+    fn simd_normed<S: fearless_simd::Simd>(simd: S, a: &[f32], b: &[f32], aa: f32, bb: f32) -> f32 {
+        dense::finish_cosine(a, b, kernels::dot_f32(simd, a, b), aa, bb)
+    }
 }
 impl Metric<f32> for Cosine {
     const DIRECTION: Direction = Direction::Similarity;
@@ -313,6 +366,13 @@ impl Metric<u8> for Dot {
 impl Kernel<u8> for Hamming {
     type Output = u32;
     const MIN_SIMD_LEN: usize = THRESHOLDS.hamming_u8;
+    // x86 pays a real call per dispatch; inside a scan the SIMD kernel wins
+    // well below the per-call threshold.
+    const MIN_SCAN_LEN: usize = if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+        32
+    } else {
+        THRESHOLDS.hamming_u8
+    };
     #[inline]
     fn portable(a: &[u8], b: &[u8]) -> u32 {
         quant::hamming_portable(a, b)

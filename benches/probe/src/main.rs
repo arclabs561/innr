@@ -90,6 +90,12 @@ pub fn probe_hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
     a.iter().zip(b).map(|(&x, &y)| (x ^ y).count_ones()).sum()
 }
 
+/// A packed byte-corpus Hamming scan, as one symbol to disassemble.
+#[inline(never)]
+pub fn probe_corpus_hamming(c: &innr::corpus::Corpus<u8>, q: &[u8], out: &mut Vec<u32>) {
+    c.scores_into::<innr::metric::Hamming>(q, out)
+}
+
 /// A named variant: label and kernel.
 type Variant<'a, T, O> = (&'a str, fn(&[T], &[T]) -> O);
 
@@ -174,6 +180,76 @@ fn main() {
             pool(|s| data::bytes(n, s), 100),
         );
         row(&format!("hamming {n} B"), &hamming, &a, &b, 10_000_000);
+    }
+    // One query against many byte codes: per-row calls (qntz's
+    // `codes.iter().map(|c| hamming_distance(query, c))`) against one
+    // packed-corpus scan. Reported per row.
+    for (rows, len) in [(256usize, 16usize), (256, 96), (10_000, 96), (10_000, 256)] {
+        let codes: Vec<Vec<u8>> = (0..rows).map(|s| data::bytes(len, s as u64)).collect();
+        let corpus = innr::corpus::Corpus::from_rows(codes.iter().map(Vec::as_slice), len).unwrap();
+        let query = data::bytes(len, 9_999);
+        let mut out: Vec<u32> = Vec::with_capacity(rows);
+        let reps = (20_000_000 / (rows * len)).max(3);
+        let (mut per_row, mut packed) = (f64::MAX, f64::MAX);
+        for _ in 0..5 {
+            let t = Instant::now();
+            for _ in 0..reps {
+                out.clear();
+                out.extend(codes.iter().map(|c| probe_hamming(black_box(&query), c)));
+                black_box(&out);
+            }
+            per_row = per_row.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
+            let t = Instant::now();
+            for _ in 0..reps {
+                probe_corpus_hamming(&corpus, black_box(&query), &mut out);
+                black_box(&out);
+            }
+            packed = packed.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
+        }
+        println!(
+            "{:>14}  per-row {per_row:7.2} ns  corpus {packed:7.2} ns  ({:.2}x)",
+            format!("scan {rows}x{len} B"),
+            per_row / packed
+        );
+    }
+    // One query against many f32 rows under cosine: per-row calls, a packed
+    // corpus (stored row norms, one dot per row), and a corpus dot scan as
+    // the floor. Reported per row.
+    for (rows, dim) in [(10_000usize, 128usize), (10_000, 768), (2_000, 1536)] {
+        let data: Vec<Vec<f32>> = (0..rows).map(|s| data::f32s(dim, s as u64)).collect();
+        let corpus = innr::corpus::Corpus::from_rows(data.iter().map(Vec::as_slice), dim).unwrap();
+        let query = data::f32s(dim, 9_999);
+        let mut out: Vec<f32> = Vec::with_capacity(rows);
+        let reps = (40_000_000 / (rows * dim)).max(3);
+        let mut best = [f64::MAX; 3];
+        for _ in 0..5 {
+            for (j, b) in best.iter_mut().enumerate() {
+                let t = Instant::now();
+                for _ in 0..reps {
+                    match j {
+                        0 => {
+                            out.clear();
+                            out.extend(
+                                data.iter().map(|r| probe_cosine_simd(black_box(&query), r)),
+                            );
+                        }
+                        1 => {
+                            corpus.scores_into::<innr::metric::Cosine>(black_box(&query), &mut out)
+                        }
+                        _ => corpus.scores_into::<innr::metric::Dot>(black_box(&query), &mut out),
+                    }
+                    black_box(&out);
+                }
+                *b = b.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
+            }
+        }
+        println!(
+            "{:>14}  per-row cosine {:7.2} ns  corpus cosine {:7.2} ns  corpus dot {:7.2} ns",
+            format!("scan {rows}x{dim}"),
+            best[0],
+            best[1],
+            best[2]
+        );
     }
     let slot: [Variant<'_, u64, u64>; 2] =
         [("innr", probe_slot_u64), ("sketchir", probe_slot_sketchir)];

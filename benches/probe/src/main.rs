@@ -320,6 +320,55 @@ fn main() {
             best[1] / best[0]
         );
     }
+    // Top-1 per point against a few centroids (k-means assignment shape):
+    // fixed per-call cost matters when each call is short.
+    for (k, d) in [(256usize, 128usize), (1024, 768)] {
+        let cents: Vec<f32> = (0..k).flat_map(|s| data::f32s(d, s as u64)).collect();
+        let packed = innr::packed::PackedRows::from_flat(&cents, d).unwrap();
+        let flat = innr::scan::Flat::new(&cents, d).unwrap();
+        let points: Vec<Vec<f32>> = (0..64).map(|s| data::f32s(d, 1000 + s)).collect();
+        let reps = (2_000_000 / (k * d)).max(2);
+        let mut best = [f64::MAX; 3];
+        for _ in 0..5 {
+            for (j, b) in best.iter_mut().enumerate() {
+                let t = Instant::now();
+                let mut acc = 0usize;
+                for _ in 0..reps {
+                    for p in &points {
+                        acc += match j {
+                            0 => packed.top_k::<innr::metric::Dot>(black_box(p), 1)[0].index,
+                            1 => {
+                                innr::scan::top_k::<innr::metric::Dot, _, _>(black_box(p), &flat, 1)
+                                    [0]
+                                .index
+                            }
+                            _ => {
+                                let mut bj = 0;
+                                let mut bv = f32::MIN;
+                                for (c, row) in cents.chunks_exact(d).enumerate() {
+                                    let v = innr::dot(black_box(p), row);
+                                    if v > bv {
+                                        bv = v;
+                                        bj = c;
+                                    }
+                                }
+                                bj
+                            }
+                        };
+                    }
+                }
+                black_box(acc);
+                *b = b.min(t.elapsed().as_nanos() as f64 / (reps * points.len()) as f64 / 1000.0);
+            }
+        }
+        println!(
+            "{:>14}  packed {:7.2} us  flat {:7.2} us  per-pair {:7.2} us",
+            format!("top1 {k}x{d}"),
+            best[0],
+            best[1],
+            best[2]
+        );
+    }
     let slot: [Variant<'_, u64, u64>; 2] =
         [("innr", probe_slot_u64), ("sketchir", probe_slot_sketchir)];
     for n in [128usize, 256] {

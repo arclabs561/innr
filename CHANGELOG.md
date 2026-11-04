@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.6
+
+### Changed
+
+- `innr::corpus::Corpus` is renamed `innr::packed::PackedRows`, matching
+  `PackedBinary` and `PackedTernary`: it packs rows (float vectors or byte
+  codes), and "corpus" suggested text documents. `innr::corpus::Corpus` stays
+  as a deprecated alias and `innr::corpus::{Hit, PackError}` as re-exports,
+  so 0.7.3 to 0.7.5 code compiles with a deprecation warning; they go in 0.8.
+
 ## 0.7.5
 
 ### Added

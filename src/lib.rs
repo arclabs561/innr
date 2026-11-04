@@ -129,7 +129,16 @@ pub mod fast_math;
 /// Batch vector operations with columnar (PDX-style) layout.
 pub mod batch;
 
-pub mod corpus;
+pub mod packed;
+
+/// The 0.7.3 to 0.7.5 path of [`packed`], kept so existing code compiles.
+pub mod corpus {
+    pub use crate::packed::{Hit, PackError};
+
+    /// Former name of [`PackedRows`](crate::packed::PackedRows).
+    #[deprecated(since = "0.7.6", note = "renamed to `innr::packed::PackedRows`")]
+    pub type Corpus<T = f32> = crate::packed::PackedRows<T>;
+}
 
 /// Sparse vector dot product via sorted-index merge join.
 mod sparse;

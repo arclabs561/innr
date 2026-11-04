@@ -92,7 +92,7 @@ pub fn probe_hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
 
 /// A packed byte-corpus Hamming scan, as one symbol to disassemble.
 #[inline(never)]
-pub fn probe_corpus_hamming(c: &innr::corpus::Corpus<u8>, q: &[u8], out: &mut Vec<u32>) {
+pub fn probe_packed_hamming(c: &innr::packed::PackedRows<u8>, q: &[u8], out: &mut Vec<u32>) {
     c.scores_into::<innr::metric::Hamming>(q, out)
 }
 
@@ -186,7 +186,7 @@ fn main() {
     // packed-corpus scan. Reported per row.
     for (rows, len) in [(256usize, 16usize), (256, 96), (10_000, 96), (10_000, 256)] {
         let codes: Vec<Vec<u8>> = (0..rows).map(|s| data::bytes(len, s as u64)).collect();
-        let corpus = innr::corpus::Corpus::from_rows(codes.iter().map(Vec::as_slice), len).unwrap();
+        let corpus = innr::packed::PackedRows::from_rows(codes.iter().map(Vec::as_slice), len).unwrap();
         let query = data::bytes(len, 9_999);
         let mut out: Vec<u32> = Vec::with_capacity(rows);
         let reps = (20_000_000 / (rows * len)).max(3);
@@ -201,7 +201,7 @@ fn main() {
             per_row = per_row.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
             let t = Instant::now();
             for _ in 0..reps {
-                probe_corpus_hamming(&corpus, black_box(&query), &mut out);
+                probe_packed_hamming(&corpus, black_box(&query), &mut out);
                 black_box(&out);
             }
             packed = packed.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
@@ -217,7 +217,7 @@ fn main() {
     // the floor. Reported per row.
     for (rows, dim) in [(10_000usize, 128usize), (10_000, 768), (2_000, 1536)] {
         let data: Vec<Vec<f32>> = (0..rows).map(|s| data::f32s(dim, s as u64)).collect();
-        let corpus = innr::corpus::Corpus::from_rows(data.iter().map(Vec::as_slice), dim).unwrap();
+        let corpus = innr::packed::PackedRows::from_rows(data.iter().map(Vec::as_slice), dim).unwrap();
         let query = data::f32s(dim, 9_999);
         let mut out: Vec<f32> = Vec::with_capacity(rows);
         let reps = (40_000_000 / (rows * dim)).max(3);

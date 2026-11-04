@@ -9,6 +9,9 @@ publish = false
 [dependencies]
 innr = { path = "../..", features = ["simd"] }
 innr-bench-support = { path = "../support" }
+# The release users run today, timed in the `prev` column. Bump it to the
+# release a change replaces.
+innr_prev = { package = "innr", version = "=0.6.3" }
 
 [profile.release]
 lto = "thin"

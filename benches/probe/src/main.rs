@@ -7,6 +7,11 @@
 //! Timings rotate inputs through a pool of eight so results are not hoisted,
 //! interleave the variants so drift hits each equally, and report the
 //! minimum of three rounds.
+//!
+//! The `prev` column is a published release (pinned in Cargo.toml) linked
+//! into the same binary: in-version columns compare SIMD with portable, and
+//! missed that 0.7.0 to 0.7.3 ran Hamming up to 1.6x slower than 0.6.3 on
+//! Apple silicon.
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -15,6 +20,10 @@ use innr_bench_support::{data, rankops};
 #[inline(never)]
 pub fn probe_dot_simd(a: &[f32], b: &[f32]) -> f32 {
     innr::dot(a, b)
+}
+#[inline(never)]
+pub fn probe_dot_prev(a: &[f32], b: &[f32]) -> f32 {
+    innr_prev::dot(a, b)
 }
 #[inline(never)]
 pub fn probe_dot_portable(a: &[f32], b: &[f32]) -> f32 {
@@ -28,6 +37,10 @@ pub fn probe_dot_rankops(a: &[f32], b: &[f32]) -> f32 {
 #[inline(never)]
 pub fn probe_cosine_simd(a: &[f32], b: &[f32]) -> f32 {
     innr::cosine(a, b)
+}
+#[inline(never)]
+pub fn probe_cosine_prev(a: &[f32], b: &[f32]) -> f32 {
+    innr_prev::cosine(a, b)
 }
 #[inline(never)]
 pub fn probe_cosine_portable(a: &[f32], b: &[f32]) -> f32 {
@@ -62,6 +75,10 @@ pub fn probe_slot_sketchir(a: &[u64], b: &[u64]) -> u64 {
 #[inline(never)]
 pub fn probe_hamming(a: &[u8], b: &[u8]) -> u32 {
     innr::hamming_distance(a, b)
+}
+#[inline(never)]
+pub fn probe_hamming_prev(a: &[u8], b: &[u8]) -> u32 {
+    innr_prev::hamming_distance(a, b)
 }
 #[inline(never)]
 pub fn probe_hamming_portable(a: &[u8], b: &[u8]) -> u32 {
@@ -119,8 +136,9 @@ fn pool<T>(gen: impl Fn(u64) -> Vec<T>, seed: u64) -> Vec<Vec<T>> {
 
 fn main() {
     println!("{}", innr::capabilities());
-    let dot: [Variant<'_, f32, f32>; 3] = [
+    let dot: [Variant<'_, f32, f32>; 4] = [
         ("simd", probe_dot_simd),
+        ("prev", probe_dot_prev),
         ("portable", probe_dot_portable),
         ("rankops", probe_dot_rankops),
     ];
@@ -131,8 +149,9 @@ fn main() {
         );
         row(&format!("dot d={d}"), &dot, &a, &b, 20_000_000);
     }
-    let cosine: [Variant<'_, f32, f32>; 3] = [
+    let cosine: [Variant<'_, f32, f32>; 4] = [
         ("simd", probe_cosine_simd),
+        ("prev", probe_cosine_prev),
         ("portable", probe_cosine_portable),
         ("clump", probe_cosine_clump),
     ];
@@ -143,8 +162,9 @@ fn main() {
         );
         row(&format!("cosine d={d}"), &cosine, &a, &b, 20_000_000);
     }
-    let hamming: [Variant<'_, u8, u32>; 3] = [
+    let hamming: [Variant<'_, u8, u32>; 4] = [
         ("innr", probe_hamming),
+        ("prev", probe_hamming_prev),
         ("portable", probe_hamming_portable),
         ("bytes", probe_hamming_bytes),
     ];

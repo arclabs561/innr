@@ -14,7 +14,7 @@
 //!   score vector.
 //!
 //! The metric is a type parameter ([`crate::metric`]); its
-//! [`Direction`] decides whether larger or smaller scores rank first.
+//! [`Direction`](crate::metric::Direction) decides whether larger or smaller scores rank first.
 //!
 //! ```
 //! use innr::packed::PackedRows;
@@ -58,8 +58,8 @@
 //! assert_eq!(best[0].index, 2);
 //! ```
 
-use crate::metric::{sealed::Kernel, Direction, Element, Metric};
-use crate::topk::TopK;
+use crate::metric::{sealed::Kernel, Element, Metric};
+use crate::scan::{self, Score};
 
 /// One result of [`PackedRows::top_k`]: a row and its score under the metric.
 ///
@@ -295,8 +295,8 @@ impl<T: Element + Default> PackedRows<T> {
         out
     }
 
-    /// [`PackedRows::scores`] into a caller-owned buffer, which is cleared first, so
-    /// repeated scans reuse its allocation.
+    /// [`PackedRows::scores`] into a caller-owned buffer, which is cleared
+    /// first, so repeated scans reuse its allocation.
     ///
     /// # Panics
     ///
@@ -305,157 +305,28 @@ impl<T: Element + Default> PackedRows<T> {
     where
         M: Metric<T>,
     {
-        out.clear();
-        out.reserve(self.len);
-        let q = self.aligned_query(query);
-        self.for_each_score::<M>(q.as_slice(), |_, s| out.push(s));
+        let q = self.prepare::<M>(query);
+        scan::scores_into::<M, T, Self>(q.as_slice(), self, out);
     }
 
-    /// Copy `query` into aligned storage after checking its length.
-    fn aligned_query(&self, query: &[T]) -> AlignedQuery<T> {
-        let mut q = AlignedQuery::new(self.dim);
-        q.load(query);
-        q
-    }
-
-    /// Call `f(row, score)` for every row, with one SIMD dispatch for the
-    /// whole corpus.
-    #[inline]
-    fn for_each_score<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
-    where
-        M: Kernel<T>,
-    {
-        debug_assert_eq!(q.len(), self.dim);
-        if M::NORMED {
-            return self.for_each_normed::<M>(q, f);
-        }
-        #[cfg(feature = "simd")]
-        if self.dim >= M::MIN_SCAN_LEN {
-            crate::arch::simd_dispatch!(
-                crate::arch::isa(),
-                s => {
-                    for i in 0..self.len {
-                        let at = self.start + i * self.stride;
-                        f(i, M::simd(s, q, &self.buf[at..at + self.dim]));
-                    }
-                },
-                _ => self.for_each_portable::<M>(q, &mut f),
-            );
-            return;
-        }
-        self.for_each_portable::<M>(q, &mut f);
-    }
-
-    /// `f(row, score)` for the listed rows only, in list order, with one
-    /// dispatch. Uses stored norms for `NORMED` metrics only if already
-    /// computed. Indices are checked by the caller.
-    fn for_each_score_at<M>(&self, q: &[T], ids: &[usize], mut f: impl FnMut(usize, M::Output))
-    where
-        M: Kernel<T>,
-    {
-        let row = |i: usize| &self.buf[self.start + i * self.stride..][..self.dim];
-        let norms = if M::NORMED { self.norms.get() } else { None };
-        let nq = norms.map(|_| M::row_norm(q).expect("innr: NORMED metric without row_norm"));
-        #[cfg(feature = "simd")]
-        if self.dim >= M::MIN_SCAN_LEN {
-            crate::arch::simd_dispatch!(
-                crate::arch::isa(),
-                s => {
-                    for &i in ids {
-                        let score = match (norms, nq) {
-                            (Some(n), Some(nq)) => M::simd_normed(s, q, row(i), nq, n[i]),
-                            _ => M::simd(s, q, row(i)),
-                        };
-                        f(i, score);
-                    }
-                },
-                _ => {
-                    for &i in ids {
-                        let score = match (norms, nq) {
-                            (Some(n), Some(nq)) => M::portable_normed(q, row(i), nq, n[i]),
-                            _ => M::portable(q, row(i)),
-                        };
-                        f(i, score);
-                    }
-                },
-            );
-            return;
-        }
-        for &i in ids {
-            let score = match (norms, nq) {
-                (Some(n), Some(nq)) => M::portable_normed(q, row(i), nq, n[i]),
-                _ => M::portable(q, row(i)),
-            };
-            f(i, score);
-        }
-    }
-
-    /// [`PackedRows::for_each_score`] for metrics that take per-row norms: the
-    /// rows' are computed once per corpus, the query's once per scan.
-    fn for_each_normed<M>(&self, q: &[T], mut f: impl FnMut(usize, M::Output))
-    where
-        M: Kernel<T>,
-    {
-        let norm = |r: &[T]| M::row_norm(r).expect("innr: NORMED metric without row_norm");
-        let norms = self.norms.get_or_init(|| self.rows().map(norm).collect());
-        let nq = norm(q);
-        #[cfg(feature = "simd")]
-        if self.dim >= M::MIN_SCAN_LEN {
-            crate::arch::simd_dispatch!(
-                crate::arch::isa(),
-                s => {
-                    for (i, &nr) in norms.iter().enumerate() {
-                        let at = self.start + i * self.stride;
-                        f(i, M::simd_normed(s, q, &self.buf[at..at + self.dim], nq, nr));
-                    }
-                },
-                _ => {
-                    for (i, &nr) in norms.iter().enumerate() {
-                        let at = self.start + i * self.stride;
-                        f(i, M::portable_normed(q, &self.buf[at..at + self.dim], nq, nr));
-                    }
-                },
-            );
-            return;
-        }
-        for (i, &nr) in norms.iter().enumerate() {
-            let at = self.start + i * self.stride;
-            f(
-                i,
-                M::portable_normed(q, &self.buf[at..at + self.dim], nq, nr),
-            );
-        }
-    }
-
-    fn for_each_portable<M>(&self, q: &[T], f: &mut impl FnMut(usize, M::Output))
-    where
-        M: Kernel<T>,
-    {
-        for i in 0..self.len {
-            let at = self.start + i * self.stride;
-            f(i, M::portable(q, &self.buf[at..at + self.dim]));
-        }
-    }
-}
-
-impl PackedRows<f32> {
     /// The `k` best rows for `query`, best first.
     ///
-    /// "Best" follows the metric's [`Direction`]: largest score for a
-    /// similarity, smallest for a distance. Returns fewer than `k` hits only
-    /// when the corpus has fewer than `k` rows, and nothing when `k == 0`.
-    /// NaN scores rank last.
+    /// "Best" follows the metric's [`Direction`](crate::metric::Direction): largest score for a
+    /// similarity, smallest for a distance. `f32` scores rank NaN last;
+    /// integer scores (`Hamming`, `Dot` on `u8`) rank exactly, ties by row
+    /// order. Returns fewer than `k` hits only when there are fewer rows.
     ///
     /// # Panics
     ///
     /// Panics if `query.len() != self.dim()`.
     #[must_use]
-    pub fn top_k<M>(&self, query: &[f32], k: usize) -> Vec<Hit>
+    pub fn top_k<M>(&self, query: &[T], k: usize) -> Vec<Hit<M::Output>>
     where
-        M: Metric<f32, Output = f32>,
+        M: Metric<T>,
+        M::Output: Score,
     {
-        let q = self.aligned_query(query);
-        self.top_k_aligned::<M>(q.as_slice(), k)
+        let q = self.prepare::<M>(query);
+        scan::top_k::<M, T, Self>(q.as_slice(), self, k)
     }
 
     /// [`PackedRows::top_k`] for each query, in order.
@@ -464,17 +335,19 @@ impl PackedRows<f32> {
     ///
     /// Panics if any query's length differs from `self.dim()`.
     #[must_use]
-    pub fn top_k_many<'a, M, I>(&self, queries: I, k: usize) -> Vec<Vec<Hit>>
+    pub fn top_k_many<'a, M, I>(&self, queries: I, k: usize) -> Vec<Vec<Hit<M::Output>>>
     where
-        M: Metric<f32, Output = f32>,
-        I: IntoIterator<Item = &'a [f32]>,
+        M: Metric<T>,
+        M::Output: Score,
+        I: IntoIterator<Item = &'a [T]>,
     {
+        self.prepare_norms::<M>();
         let mut q = AlignedQuery::new(self.dim);
         queries
             .into_iter()
             .map(|query| {
                 q.load(query);
-                self.top_k_aligned::<M>(q.as_slice(), k)
+                scan::top_k::<M, T, Self>(q.as_slice(), self, k)
             })
             .collect()
     }
@@ -487,116 +360,47 @@ impl PackedRows<f32> {
     /// the same rows), then score only those exactly here, in one dispatch.
     /// An index listed twice is scored twice. For cosine, stored row norms
     /// are used if a full scan already computed them; a rerank alone does not
-    /// compute norms for every row.
+    /// compute norms for every row. [`scan::rerank`] does the same over rows
+    /// in any layout.
     ///
     /// # Panics
     ///
     /// Panics if `query.len() != self.dim()` or a candidate is out of range.
     #[must_use]
-    pub fn rerank<M, I>(&self, query: &[f32], candidates: I, k: usize) -> Vec<Hit>
+    pub fn rerank<M, I>(&self, query: &[T], candidates: I, k: usize) -> Vec<Hit<M::Output>>
     where
-        M: Metric<f32, Output = f32>,
+        M: Metric<T>,
+        M::Output: Score,
         I: IntoIterator<Item = usize>,
     {
-        let ids: Vec<usize> = candidates.into_iter().collect();
-        if let Some(&bad) = ids.iter().find(|&&i| i >= self.len) {
-            panic!(
-                "innr::PackedRows::rerank: candidate {bad} out of range ({})",
-                self.len
-            );
-        }
-        let k = k.min(ids.len());
-        if k == 0 {
-            return Vec::new();
-        }
         let q = self.aligned_query(query);
-        let flip = matches!(M::DIRECTION, Direction::Similarity);
-        let mut top = TopK::new(k);
-        self.for_each_score_at::<M>(q.as_slice(), &ids, |i, s| {
-            top.insert(i as u32, if flip { -s } else { s });
-        });
-        top.into_sorted()
-            .into_iter()
-            .map(|(i, s)| Hit {
-                index: i as usize,
-                score: if flip { -s } else { s },
-            })
-            .collect()
+        scan::rerank::<M, T, Self, I>(q.as_slice(), self, candidates, k)
     }
 
-    fn top_k_aligned<M>(&self, q: &[f32], k: usize) -> Vec<Hit>
-    where
-        M: Metric<f32, Output = f32>,
-    {
-        if k == 0 || self.len == 0 {
-            return Vec::new();
+    /// Copy `query` into aligned storage after checking its length, and
+    /// compute the rows' norms first if `M` uses them.
+    fn prepare<M: Kernel<T>>(&self, query: &[T]) -> AlignedQuery<T> {
+        self.prepare_norms::<M>();
+        self.aligned_query(query)
+    }
+
+    /// Fill the stored row norms once, for metrics that use them.
+    fn prepare_norms<M: Kernel<T>>(&self) {
+        if M::NORMED {
+            let norm = |r: &[T]| M::row_norm(r).expect("innr: NORMED metric without row_norm");
+            let _ = self.norms.get_or_init(|| self.rows().map(norm).collect());
         }
-        // TopK keeps the smallest keys; negate similarities so the largest
-        // score has the smallest key. Row indices fit u32 for any corpus
-        // whose rows fit in memory at 16+ dimensions; larger counts are
-        // rejected below rather than truncated.
-        let flip = matches!(M::DIRECTION, Direction::Similarity);
-        let mut top = TopK::new(k.min(self.len));
-        assert!(
-            u32::try_from(self.len).is_ok(),
-            "innr::PackedRows::top_k: more than u32::MAX rows"
-        );
-        self.for_each_score::<M>(q, |i, s| {
-            top.insert(i as u32, if flip { -s } else { s });
-        });
-        top.into_sorted()
-            .into_iter()
-            .map(|(i, s)| Hit {
-                index: i as usize,
-                score: if flip { -s } else { s },
-            })
-            .collect()
+    }
+
+    /// Copy `query` into aligned storage after checking its length.
+    fn aligned_query(&self, query: &[T]) -> AlignedQuery<T> {
+        let mut q = AlignedQuery::new(self.dim);
+        q.load(query);
+        q
     }
 }
 
 impl PackedRows<u8> {
-    /// The `k` best rows for `query` under a byte metric (`Hamming`, or `Dot`
-    /// on `u8`), best first.
-    ///
-    /// Scores are integers and rank exactly, ties by row order. Returns fewer
-    /// than `k` hits only when the corpus has fewer than `k` rows, and
-    /// nothing when `k == 0`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `query.len() != self.dim()`.
-    #[must_use]
-    pub fn top_k<M>(&self, query: &[u8], k: usize) -> Vec<Hit<M::Output>>
-    where
-        M: Metric<u8>,
-        M::Output: Ord,
-    {
-        let q = self.aligned_query(query);
-        self.top_k_aligned_int::<M>(q.as_slice(), k)
-    }
-
-    /// [`PackedRows::top_k`] for each query, in order.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any query's length differs from `self.dim()`.
-    #[must_use]
-    pub fn top_k_many<'a, M, I>(&self, queries: I, k: usize) -> Vec<Vec<Hit<M::Output>>>
-    where
-        M: Metric<u8>,
-        M::Output: Ord,
-        I: IntoIterator<Item = &'a [u8]>,
-    {
-        let mut q = AlignedQuery::new(self.dim);
-        queries
-            .into_iter()
-            .map(|query| {
-                q.load(query);
-                self.top_k_aligned_int::<M>(q.as_slice(), k)
-            })
-            .collect()
-    }
-
     /// [`sign_dot`](crate::binary::sign_dot) of `query` against every code,
     /// in row order, into a caller-owned buffer (cleared first), with one
     /// SIMD dispatch for the whole scan.
@@ -606,9 +410,7 @@ impl PackedRows<u8> {
     /// Panics if a code is shorter than `query.len().div_ceil(8)` bytes,
     /// that is, if `8 * self.dim() < query.len()`.
     pub fn sign_dot_into(&self, query: &[f32], out: &mut Vec<f32>) {
-        out.clear();
-        out.reserve(self.len);
-        self.for_each_sign_dot(query, |_, s| out.push(s));
+        scan::sign_dot_into(query, self, out);
     }
 
     /// The `k` codes with the largest [`sign_dot`](crate::binary::sign_dot)
@@ -619,113 +421,7 @@ impl PackedRows<u8> {
     /// Panics if `8 * self.dim() < query.len()`.
     #[must_use]
     pub fn sign_dot_top_k(&self, query: &[f32], k: usize) -> Vec<Hit> {
-        let k = k.min(self.len);
-        if k == 0 {
-            return Vec::new();
-        }
-        assert!(
-            u32::try_from(self.len).is_ok(),
-            "innr::PackedRows::sign_dot_top_k: more than u32::MAX rows"
-        );
-        // TopK keeps the smallest keys: negate so the largest score ranks first.
-        let mut top = TopK::new(k);
-        self.for_each_sign_dot(query, |i, s| top.insert(i as u32, -s));
-        top.into_sorted()
-            .into_iter()
-            .map(|(i, s)| Hit {
-                index: i as usize,
-                score: -s,
-            })
-            .collect()
-    }
-
-    fn for_each_sign_dot(&self, query: &[f32], mut f: impl FnMut(usize, f32)) {
-        assert!(
-            self.dim * 8 >= query.len(),
-            "innr::PackedRows::sign_dot: codes have {} bytes, query needs {}",
-            self.dim,
-            query.len().div_ceil(8)
-        );
-        let row = |i: usize| &self.buf[self.start + i * self.stride..][..self.dim];
-        #[cfg(feature = "simd")]
-        if query.len() >= 8 {
-            crate::arch::simd_dispatch!(
-                crate::arch::isa(),
-                s => {
-                    for i in 0..self.len {
-                        f(i, crate::arch::kernels::sign_dot_f32(s, query, row(i)));
-                    }
-                },
-                _ => {
-                    for i in 0..self.len {
-                        f(i, crate::portable::sign_dot_f32(query, row(i)));
-                    }
-                },
-            );
-            return;
-        }
-        for i in 0..self.len {
-            f(i, crate::portable::sign_dot_f32(query, row(i)));
-        }
-    }
-
-    fn top_k_aligned_int<M>(&self, q: &[u8], k: usize) -> Vec<Hit<M::Output>>
-    where
-        M: Metric<u8>,
-        M::Output: Ord,
-    {
-        let k = k.min(self.len);
-        if k == 0 {
-            return Vec::new();
-        }
-        // A max-heap of the k best seen so far, keyed so its top is the
-        // worst kept hit: (score, row) for a distance, (Reverse(score), row)
-        // for a similarity. The row breaks ties toward the earlier row.
-        use core::cmp::Reverse;
-        use std::collections::BinaryHeap;
-        let mut hits: Vec<Hit<M::Output>> = match M::DIRECTION {
-            Direction::Distance => {
-                let mut heap = BinaryHeap::with_capacity(k + 1);
-                self.for_each_score::<M>(q, |i, s| {
-                    if heap.len() < k {
-                        heap.push((s, i));
-                    } else if let Some(&(worst, _)) = heap.peek() {
-                        if s < worst {
-                            heap.pop();
-                            heap.push((s, i));
-                        }
-                    }
-                });
-                heap.into_iter()
-                    .map(|(score, index)| Hit { index, score })
-                    .collect()
-            }
-            Direction::Similarity => {
-                let mut heap = BinaryHeap::with_capacity(k + 1);
-                self.for_each_score::<M>(q, |i, s| {
-                    if heap.len() < k {
-                        heap.push((Reverse(s), i));
-                    } else if let Some(&(Reverse(worst), _)) = heap.peek() {
-                        if s > worst {
-                            heap.pop();
-                            heap.push((Reverse(s), i));
-                        }
-                    }
-                });
-                heap.into_iter()
-                    .map(|(Reverse(score), index)| Hit { index, score })
-                    .collect()
-            }
-        };
-        match M::DIRECTION {
-            Direction::Distance => {
-                hits.sort_by(|a, b| a.score.cmp(&b.score).then(a.index.cmp(&b.index)))
-            }
-            Direction::Similarity => {
-                hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.index.cmp(&b.index)))
-            }
-        }
-        hits
+        scan::sign_dot_top_k(query, self, k)
     }
 }
 
@@ -761,7 +457,7 @@ impl<T: Copy + Default> AlignedQuery<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metric::{Cosine, Dot, L2Sq, L1};
+    use crate::metric::{Cosine, Direction, Dot, L2Sq, L1};
 
     fn rows(n: usize, dim: usize, seed: u32) -> Vec<Vec<f32>> {
         (0..n)

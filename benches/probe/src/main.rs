@@ -96,6 +96,24 @@ pub fn probe_packed_hamming(c: &innr::packed::PackedRows<u8>, q: &[u8], out: &mu
     c.scores_into::<innr::metric::Hamming>(q, out)
 }
 
+#[inline(never)]
+pub fn probe_sign_dot(q: &[f32], code: &[u8]) -> f32 {
+    innr::binary::sign_dot(q, code)
+}
+/// qntz 0.3's `asymmetric_distance_prerotated` inner loop: one accumulator,
+/// one branch per bit.
+#[inline(never)]
+pub fn probe_sign_dot_qntz(q: &[f32], code: &[u8]) -> f32 {
+    let mut ip = 0.0f32;
+    for (j, &byte) in code.iter().enumerate().take(q.len() / 8) {
+        for t in 0..8 {
+            let x = q[j * 8 + t];
+            ip += if byte & (1 << t) != 0 { x } else { -x };
+        }
+    }
+    ip
+}
+
 /// A named variant: label and kernel.
 type Variant<'a, T, O> = (&'a str, fn(&[T], &[T]) -> O);
 
@@ -186,7 +204,8 @@ fn main() {
     // packed-corpus scan. Reported per row.
     for (rows, len) in [(256usize, 16usize), (256, 96), (10_000, 96), (10_000, 256)] {
         let codes: Vec<Vec<u8>> = (0..rows).map(|s| data::bytes(len, s as u64)).collect();
-        let corpus = innr::packed::PackedRows::from_rows(codes.iter().map(Vec::as_slice), len).unwrap();
+        let corpus =
+            innr::packed::PackedRows::from_rows(codes.iter().map(Vec::as_slice), len).unwrap();
         let query = data::bytes(len, 9_999);
         let mut out: Vec<u32> = Vec::with_capacity(rows);
         let reps = (20_000_000 / (rows * len)).max(3);
@@ -217,7 +236,8 @@ fn main() {
     // the floor. Reported per row.
     for (rows, dim) in [(10_000usize, 128usize), (10_000, 768), (2_000, 1536)] {
         let data: Vec<Vec<f32>> = (0..rows).map(|s| data::f32s(dim, s as u64)).collect();
-        let corpus = innr::packed::PackedRows::from_rows(data.iter().map(Vec::as_slice), dim).unwrap();
+        let corpus =
+            innr::packed::PackedRows::from_rows(data.iter().map(Vec::as_slice), dim).unwrap();
         let query = data::f32s(dim, 9_999);
         let mut out: Vec<f32> = Vec::with_capacity(rows);
         let reps = (40_000_000 / (rows * dim)).max(3);
@@ -249,6 +269,55 @@ fn main() {
             best[0],
             best[1],
             best[2]
+        );
+    }
+    // f32 query against sign-bit codes: per call (innr, qntz's serial
+    // loop), and a packed scan of many codes, per code.
+    for bits in [128usize, 768, 1536] {
+        let q = data::f32s(bits, 5);
+        let codes: Vec<Vec<u8>> = (0..8).map(|s| data::bytes(bits / 8, s)).collect();
+        let qs: Vec<Vec<f32>> = (0..8).map(|s| data::f32s(bits, s + 50)).collect();
+        let mut best = [f64::MAX; 2];
+        let iters = (8_000_000 / bits).max(10_000);
+        for _ in 0..5 {
+            for (j, f) in [probe_sign_dot, probe_sign_dot_qntz].iter().enumerate() {
+                let mut acc = 0.0f32;
+                let t = Instant::now();
+                for i in 0..iters {
+                    acc += f(black_box(&qs[i & 7]), black_box(&codes[i & 7]));
+                }
+                black_box(acc);
+                best[j] = best[j].min(t.elapsed().as_nanos() as f64 / iters as f64);
+            }
+        }
+        let rows = 10_000;
+        let many: Vec<Vec<u8>> = (0..rows).map(|s| data::bytes(bits / 8, s as u64)).collect();
+        let packed =
+            innr::packed::PackedRows::from_rows(many.iter().map(Vec::as_slice), bits / 8).unwrap();
+        let mut out = Vec::with_capacity(rows);
+        let (mut per, mut scan) = (f64::MAX, f64::MAX);
+        let reps = (20_000_000 / (rows * bits)).max(2);
+        for _ in 0..5 {
+            let t = Instant::now();
+            for _ in 0..reps {
+                out.clear();
+                out.extend(many.iter().map(|c| probe_sign_dot(black_box(&q), c)));
+                black_box(&out);
+            }
+            per = per.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
+            let t = Instant::now();
+            for _ in 0..reps {
+                packed.sign_dot_into(black_box(&q), &mut out);
+                black_box(&out);
+            }
+            scan = scan.min(t.elapsed().as_nanos() as f64 / (reps * rows) as f64);
+        }
+        println!(
+            "{:>14}  innr {:7.2} ns  qntz {:7.2} ns ({:.1}x)  scan/code {per:7.2} -> {scan:7.2} ns",
+            format!("sign_dot {bits}b"),
+            best[0],
+            best[1],
+            best[1] / best[0]
         );
     }
     let slot: [Variant<'_, u64, u64>; 2] =

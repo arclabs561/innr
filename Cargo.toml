@@ -57,7 +57,7 @@ fearless_simd = { version = "1.2", features = ["force_support_fallback"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.5"
 qntz = { version = "0.2.1", features = ["rabitq"] }
-rand = "0.9"
+rand = "0.10"
 # Proves the anndists feature against the real consumer (tests/anndists_interop.rs).
 hnsw_rs = "0.3"
 # Consumer-shape benches: wass's ndarray fallback, and shared generators plus

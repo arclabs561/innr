@@ -131,6 +131,8 @@ pub mod batch;
 
 pub mod packed;
 
+pub mod scan;
+
 /// The 0.7.3 to 0.7.5 path of [`packed`], kept so existing code compiles.
 pub mod corpus {
     pub use crate::packed::{Hit, PackError};

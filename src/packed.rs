@@ -261,6 +261,20 @@ impl<T: Element + Default> PackedRows<T> {
         &self.buf[at..at + self.dim]
     }
 
+    /// The rows in order, walked by stride (no per-row range check).
+    pub(crate) fn strided_rows(&self) -> impl Iterator<Item = &[T]> + '_ {
+        let dim = self.dim;
+        self.buf[self.start..]
+            .chunks(self.stride)
+            .take(self.len)
+            .map(move |c| &c[..dim])
+    }
+
+    /// Cosine row norms, if a cosine scan has computed them.
+    pub(crate) fn stored_norms(&self) -> Option<&[T]> {
+        self.norms.get().map(Vec::as_slice)
+    }
+
     /// The rows in order.
     pub fn rows(&self) -> impl ExactSizeIterator<Item = &[T]> + '_ {
         (0..self.len).map(|i| self.row(i))

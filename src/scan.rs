@@ -206,10 +206,12 @@ impl<T> Rows<T> for Flat<'_, T> {
     }
 }
 
-/// A metric output that [`top_k`] and [`rerank`] can rank: `f32` (NaN last)
-/// and the exact integer outputs `u32` and `u64` (ties by row order). Sealed.
+/// A metric output that [`top_k`] and [`rerank`] can rank: `f32` and `f64`
+/// (NaN last) and the exact integer outputs `u32` and `u64` (ties by row
+/// order). Sealed.
 pub trait Score: Copy + sealed::Select {}
 impl Score for f32 {}
+impl Score for f64 {}
 impl Score for u32 {}
 impl Score for u64 {}
 
@@ -261,6 +263,66 @@ pub(crate) mod sealed {
                 .map(|(i, s)| Hit {
                     index: i as usize,
                     score: if flip { -s } else { s },
+                })
+                .collect()
+        }
+    }
+
+    /// `f64` keys in total order with every NaN made positive, so NaN sorts
+    /// after every number (ranks last).
+    #[derive(Clone, Copy, PartialEq)]
+    pub struct Key(f64);
+    impl Eq for Key {}
+    impl PartialOrd for Key {
+        fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl Ord for Key {
+        fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+            self.0.total_cmp(&other.0)
+        }
+    }
+
+    pub struct DoubleSel {
+        k: usize,
+        flip: bool,
+        heap: BinaryHeap<(Key, usize)>,
+    }
+
+    impl Select for f64 {
+        type Sel = DoubleSel;
+        fn start(k: usize, dir: Direction) -> DoubleSel {
+            DoubleSel {
+                k,
+                flip: matches!(dir, Direction::Similarity),
+                heap: BinaryHeap::with_capacity(k + 1),
+            }
+        }
+        #[inline]
+        fn push(sel: &mut DoubleSel, row: usize, score: f64) {
+            let key = if score.is_nan() {
+                f64::NAN
+            } else if sel.flip {
+                -score
+            } else {
+                score
+            };
+            if sel.heap.len() < sel.k {
+                sel.heap.push((Key(key), row));
+            } else if sel.heap.peek().is_some_and(|&(worst, _)| Key(key) < worst) {
+                sel.heap.pop();
+                sel.heap.push((Key(key), row));
+            }
+        }
+        fn finish(sel: DoubleSel) -> Vec<Hit<f64>> {
+            let flip = sel.flip;
+            let mut v = sel.heap.into_vec();
+            v.sort_unstable();
+            v.into_iter()
+                .map(|(Key(k), index)| Hit {
+                    index,
+                    score: if flip && !k.is_nan() { -k } else { k },
                 })
                 .collect()
         }
@@ -657,6 +719,26 @@ mod tests {
         packed.sign_dot_into(fq, &mut b);
         assert_eq!(a, b);
         assert_eq!(sign_dot_top_k(fq, &flat, 5), packed.sign_dot_top_k(fq, 5));
+    }
+
+    /// f64 rows rank like f32 rows: by direction, NaN last.
+    #[test]
+    fn f64_top_k_ranks_by_direction_with_nan_last() {
+        let rows: Vec<Vec<f64>> = vec![
+            vec![1.0, 0.0],
+            vec![f64::NAN, 0.0],
+            vec![0.5, 0.5],
+            vec![-1.0, 0.0],
+        ];
+        let q = [1.0, 0.0];
+        let dot = top_k::<Dot, _, _>(&q, rows.as_slice(), 4);
+        assert_eq!(
+            dot.iter().map(|h| h.index).collect::<Vec<_>>(),
+            [0, 2, 3, 1]
+        );
+        assert!(dot[3].score.is_nan());
+        let l2 = top_k::<L2Sq, _, _>(&q, rows.as_slice(), 2);
+        assert_eq!(l2.iter().map(|h| h.index).collect::<Vec<_>>(), [0, 2]);
     }
 
     #[test]

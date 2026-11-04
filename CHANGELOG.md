@@ -7,7 +7,7 @@
 - `hamming_distance` is faster on Apple silicon (aarch64 with `dotprod`):
   the portable kernel is a byte loop that compiles to `cnt` plus `udot`,
   and the SIMD kernel takes over from 2048 B instead of 128 B. Apple M3
-  Max, per call: 96 B 7.43 to 6.23 ns, 128 B 11.4 to 7.7 ns, 256 B 18.8 to
+  Max, per call, one interleaved run (ratios held across runs, absolute times varied with machine load): 96 B 7.43 to 6.23 ns, 128 B 11.4 to 7.7 ns, 256 B 18.8 to
   11.9 ns. 0.7.0 to 0.7.3 were up to 1.6x slower than 0.6.3 at 96 to 256
   B on these targets. x86_64 and generic aarch64 Linux are unchanged.
 

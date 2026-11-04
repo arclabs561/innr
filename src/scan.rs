@@ -243,8 +243,15 @@ pub(crate) mod sealed {
         }
         #[inline]
         fn push(sel: &mut FloatSel, row: usize, score: f32) {
+            let key = if sel.flip { -score } else { score };
+            // Most rows lose to the current worst kept key: reject them with
+            // one compare. `>=` is false when either side is NaN, so NaN keys
+            // and a NaN threshold still reach TopK's total-order handling.
+            if key >= sel.top.threshold() {
+                return;
+            }
             let id = u32::try_from(row).expect("innr::scan: more than u32::MAX rows");
-            sel.top.insert(id, if sel.flip { -score } else { score });
+            sel.top.insert(id, key);
         }
         fn finish(sel: FloatSel) -> Vec<Hit> {
             let flip = sel.flip;

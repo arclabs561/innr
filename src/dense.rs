@@ -85,15 +85,15 @@ pub fn norm(v: &[f32]) -> f32 {
     if squared.is_normal() {
         squared.sqrt()
     } else {
-        norm_wide(v) as f32
+        norm_wide(v.iter().copied()) as f32
     }
 }
 
 // An f32 square may overflow or become subnormal even when the norm is
 // representable. The sum of squared finite f32s fits in f64 for any slice.
 #[cold]
-fn norm_wide(v: &[f32]) -> f64 {
-    v.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>().sqrt()
+pub(crate) fn norm_wide(values: impl Iterator<Item = f32>) -> f64 {
+    values.map(|x| f64::from(x).powi(2)).sum::<f64>().sqrt()
 }
 
 /// Normalize a vector to unit length (in-place).
@@ -132,7 +132,7 @@ pub fn normalize(v: &mut [f32]) {
 pub fn normalize_with_norm(v: &mut [f32]) -> f32 {
     let squared = dot(v, v);
     if !squared.is_normal() {
-        let n = norm_wide(v);
+        let n = norm_wide(v.iter().copied());
         if n > f64::from(crate::NORM_EPSILON) {
             let inv = n.recip();
             for x in v {

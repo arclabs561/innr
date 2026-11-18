@@ -213,6 +213,11 @@ impl VerticalBatch {
         &self.data
     }
 
+    #[cold]
+    fn row_norm_wide(&self, row: usize) -> f64 {
+        crate::dense::norm_wide((0..self.dimension).map(|d| self.get(d, row)))
+    }
+
     /// Extract a single vector (allocates).
     pub fn extract_vector(&self, vec_idx: usize) -> Vec<f32> {
         (0..self.dimension).map(|d| self.get(d, vec_idx)).collect()
@@ -680,8 +685,12 @@ pub fn batch_norms_into(batch: &VerticalBatch, norms: &mut Vec<f32>) {
         }
     }
 
-    for norm in norms.iter_mut() {
-        *norm = norm.sqrt();
+    for (row, norm) in norms.iter_mut().enumerate() {
+        *norm = if norm.is_normal() {
+            norm.sqrt()
+        } else {
+            batch.row_norm_wide(row) as f32
+        };
     }
 }
 
@@ -718,13 +727,47 @@ pub fn batch_cosine_into(
         return;
     }
 
-    for (cosine, &norm) in cosines.iter_mut().zip(norms.iter()) {
+    // Recompute an overflowing query norm once for the whole batch.
+    let query_norm_wide = if query_norm.is_infinite() {
+        crate::dense::norm_wide(query.iter().copied())
+    } else {
+        f64::from(query_norm)
+    };
+    for (row, (cosine, &norm)) in cosines.iter_mut().zip(norms).enumerate() {
         *cosine = if norm > crate::NORM_EPSILON {
-            *cosine / (query_norm * norm)
+            let denominator = query_norm * norm;
+            if cosine.is_finite() && denominator.is_finite() {
+                *cosine / denominator
+            } else {
+                row_cosine_wide(query, query_norm_wide, batch, row, norm)
+            }
         } else {
             0.0
         };
     }
+}
+
+// A dot can overflow before cancellation, and the product of two valid norms
+// can overflow even when the dot fits. The caller's finite row norm is reused.
+#[cold]
+fn row_cosine_wide(
+    query: &[f32],
+    query_norm: f64,
+    batch: &VerticalBatch,
+    row: usize,
+    norm: f32,
+) -> f32 {
+    let dot: f64 = query
+        .iter()
+        .enumerate()
+        .map(|(d, &q)| f64::from(q) * f64::from(batch.get(d, row)))
+        .sum();
+    let norm = if norm.is_infinite() {
+        batch.row_norm_wide(row)
+    } else {
+        f64::from(norm)
+    };
+    (dot / (query_norm * norm)) as f32
 }
 
 /// Find k vectors with highest dot product (maximum inner product search).

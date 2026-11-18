@@ -246,10 +246,9 @@ pub(crate) mod sealed {
         #[inline]
         fn push(sel: &mut FloatSel, row: usize, score: f32) {
             let key = if sel.flip { -score } else { score };
-            // Most rows lose to the current worst kept key: reject them with
-            // one compare. `>=` is false when either side is NaN, so NaN keys
-            // and a NaN threshold still reach TopK's total-order handling.
-            if key >= sel.top.threshold() {
+            // The threshold is +infinity while slots are free, so a key equal
+            // to it can still belong. TopK handles ties and NaNs in total order.
+            if key > sel.top.threshold() {
                 return;
             }
             let id = u32::try_from(row).expect("innr::scan: more than u32::MAX rows");
@@ -719,6 +718,26 @@ mod tests {
         packed.sign_dot_into(fq, &mut b);
         assert_eq!(a, b);
         assert_eq!(sign_dot_top_k(fq, &flat, 5), packed.sign_dot_top_k(fq, 5));
+    }
+
+    #[test]
+    fn f32_top_k_keeps_infinite_distances_until_full() {
+        let rows = [[0.0_f32], [2e19]];
+        let expected = [
+            Hit {
+                index: 0,
+                score: 0.0,
+            },
+            Hit {
+                index: 1,
+                score: f32::INFINITY,
+            },
+        ];
+        assert_eq!(top_k::<L2Sq, _, _>(&[0.0], &rows[..], 2), expected);
+        assert_eq!(
+            rerank::<L2Sq, _, _, _>(&[0.0], &rows[..], [1, 0], 2),
+            expected
+        );
     }
 
     /// f64 rows rank like f32 rows: by direction, NaN last.

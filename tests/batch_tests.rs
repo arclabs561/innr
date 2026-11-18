@@ -391,6 +391,68 @@ fn batch_norms_correct() {
 }
 
 #[test]
+fn extreme_batch_cosines_match_rowwise_f64() {
+    let rows = [
+        [-3e20f32, -4e20],
+        [-4e20, 3e20],
+        [3e20, 4e20],
+        [3e-30, 4e-30],
+        [1e18, 1e20],
+        [f32::MAX, f32::MAX],
+        [1.0, 0.0],
+    ];
+    let batch = VerticalBatch::from_slices(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>());
+    let norms = batch_norms(&batch);
+    let row_norm = |v: &[f32; 2]| f64::from(v[0]).hypot(f64::from(v[1]));
+    for (row, &norm) in rows.iter().zip(&norms) {
+        assert_eq!(norm, row_norm(row) as f32);
+    }
+
+    for query in [[3e20, 4e20], [f32::MAX, f32::MAX], [1.0, 0.0], [1e20, 0.0]] {
+        let scores = batch_cosine(&query, &batch, &norms);
+        let expected: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                let n = row_norm(row);
+                if n <= 1e-9 {
+                    return 0.0;
+                }
+                let dot = f64::from(query[0]) * f64::from(row[0])
+                    + f64::from(query[1]) * f64::from(row[1]);
+                (dot / (row_norm(&query) * n)) as f32
+            })
+            .collect();
+        for (&score, &want) in scores.iter().zip(&expected) {
+            assert!(
+                (score - want).abs() < 1e-6,
+                "query={query:?}, {score} vs {want}"
+            );
+        }
+        let best = (0..rows.len())
+            .max_by(|&i, &j| expected[i].total_cmp(&expected[j]))
+            .unwrap();
+        assert_eq!(batch_knn_cosine(&query, &batch, 1).indices, [best]);
+    }
+}
+
+#[test]
+fn batch_cosine_keeps_cutoffs_and_uses_supplied_norms() {
+    let rows = VerticalBatch::from_slices(&[&[1.0], &[1e-9], &[1e-9f32.next_up()]]);
+    let norms = batch_norms(&rows);
+    assert_eq!(
+        batch_cosine(&[1e-9f32.next_down()], &rows, &norms),
+        [0.0; 3]
+    );
+    let scores = batch_cosine(&[1e-9], &rows, &norms);
+    assert!((scores[0] - 1.0).abs() < 1e-6);
+    assert_eq!(scores[1], 0.0);
+    assert!((scores[2] - 1.0).abs() < 1e-6);
+
+    let rows = VerticalBatch::from_slices(&[&[1e20]]);
+    assert!((batch_cosine(&[1e20], &rows, &[2e20])[0] - 0.5).abs() < 1e-6);
+}
+
+#[test]
 fn cosine_with_zero_norm() {
     let vectors = vec![
         vec![1.0, 0.0],

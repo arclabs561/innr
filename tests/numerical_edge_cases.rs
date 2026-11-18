@@ -3,7 +3,7 @@
 //! These tests target real-world numerical issues that can occur in
 //! embedding-based retrieval systems. Grounded in actual failure modes.
 
-use innr::{cosine, dot, l2_distance, l2_distance_squared, norm};
+use innr::{cosine, dot, l2_distance, l2_distance_squared, norm, normalize_with_norm};
 
 // =============================================================================
 // Denormalized Numbers (Very Small Values)
@@ -139,6 +139,59 @@ fn handles_odd_dimensions() {
 // =============================================================================
 // Normalized Vector Properties
 // =============================================================================
+
+#[test]
+fn normalization_handles_overflowing_squares_and_norms() {
+    for len in [2, 64] {
+        let mut v = vec![0.0; len];
+        v[0] = 3e20;
+        v[len - 1] = -4e20;
+        let n = norm(&v);
+        assert!((n / 5e20 - 1.0).abs() < 1e-6);
+        assert_eq!(normalize_with_norm(&mut v), n);
+        assert!((v[0] - 0.6).abs() < 1e-6);
+        assert!((v[len - 1] + 0.8).abs() < 1e-6);
+    }
+
+    let mut v = [f32::MAX; 2];
+    assert_eq!(norm(&v), f32::INFINITY);
+    assert_eq!(normalize_with_norm(&mut v), f32::INFINITY);
+    for x in v {
+        assert!((x - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn tiny_norm_survives_underflow_without_changing_the_vector() {
+    // A square can become subnormal, round to zero, or have only a few bits.
+    for magnitude in [1e-21, 3e-23, 1e-30, f32::from_bits(1), 1e-9] {
+        let mut v = [magnitude, -0.0];
+        assert_eq!(norm(&v), magnitude);
+        assert_eq!(normalize_with_norm(&mut v), magnitude);
+        assert_eq!(
+            v.map(f32::to_bits),
+            [magnitude.to_bits(), (-0.0f32).to_bits()]
+        );
+    }
+
+    let above_cutoff = 1e-9f32.next_up();
+    let mut v = [above_cutoff];
+    assert_eq!(normalize_with_norm(&mut v), above_cutoff);
+    assert!((v[0] - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn normalization_preserves_nonfinite_behavior() {
+    let mut v = [f32::NAN, 2.0];
+    assert!(normalize_with_norm(&mut v).is_nan());
+    assert!(v[0].is_nan());
+    assert_eq!(v[1], 2.0);
+
+    let mut v = [f32::NEG_INFINITY, -2.0];
+    assert_eq!(normalize_with_norm(&mut v), f32::INFINITY);
+    assert!(v[0].is_nan());
+    assert_eq!(v[1].to_bits(), (-0.0f32).to_bits());
+}
 
 #[test]
 fn normalized_vectors_have_unit_norm() {

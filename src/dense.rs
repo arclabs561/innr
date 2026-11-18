@@ -68,6 +68,8 @@ pub fn dot_portable(a: &[f32], b: &[f32]) -> f32 {
 
 /// L2 norm (Euclidean norm) of a vector: `sqrt(Σ(v[i]²))`.
 ///
+/// Returns infinity when the norm exceeds the range of `f32`.
+///
 /// # Example
 ///
 /// ```rust
@@ -79,13 +81,25 @@ pub fn dot_portable(a: &[f32], b: &[f32]) -> f32 {
 #[inline]
 #[must_use]
 pub fn norm(v: &[f32]) -> f32 {
-    dot(v, v).sqrt()
+    let squared = dot(v, v);
+    if squared.is_normal() {
+        squared.sqrt()
+    } else {
+        norm_wide(v) as f32
+    }
+}
+
+// An f32 square may overflow or become subnormal even when the norm is
+// representable. The sum of squared finite f32s fits in f64 for any slice.
+#[cold]
+fn norm_wide(v: &[f32]) -> f64 {
+    v.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>().sqrt()
 }
 
 /// Normalize a vector to unit length (in-place).
 ///
-/// After normalization, `norm(v) == 1.0` (within floating-point precision).
-/// Zero vectors are left unchanged (no division by zero).
+/// Finite vectors with norm above `1e-9` are scaled to unit length.
+/// Vectors at or below that threshold are left unchanged.
 ///
 /// # Example
 ///
@@ -103,10 +117,9 @@ pub fn normalize(v: &mut [f32]) {
 
 /// Normalize `v` to unit length in place and return its original L2 norm.
 ///
-/// Vectors with norm below `1e-9` are left unchanged (their norm is still
-/// returned). Several consumers need the pre-normalization norm (for
-/// rescaling, gradient code, or logging); without this they reimplement the
-/// norm-guard-scale loop by hand.
+/// Vectors with norm at or below `1e-9` are left unchanged. A finite vector
+/// whose norm overflows `f32` is still normalized, and its returned norm
+/// is infinity.
 ///
 /// ```
 /// use innr::{normalize_with_norm, norm};
@@ -117,7 +130,19 @@ pub fn normalize(v: &mut [f32]) {
 /// assert!((norm(&v) - 1.0).abs() < 1e-6);
 /// ```
 pub fn normalize_with_norm(v: &mut [f32]) -> f32 {
-    let n = norm(v);
+    let squared = dot(v, v);
+    if !squared.is_normal() {
+        let n = norm_wide(v);
+        if n > f64::from(crate::NORM_EPSILON) {
+            let inv = n.recip();
+            for x in v {
+                *x = (f64::from(*x) * inv) as f32;
+            }
+        }
+        return n as f32;
+    }
+
+    let n = squared.sqrt();
     if n > crate::NORM_EPSILON {
         let inv = 1.0 / n;
         for x in v.iter_mut() {

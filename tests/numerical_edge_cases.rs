@@ -10,6 +10,19 @@ use innr::{cosine, dot, l2_distance, l2_distance_squared, norm, normalize_with_n
 // =============================================================================
 
 #[test]
+fn euclidean_distance_survives_an_unrepresentable_square() {
+    for len in [1, 64] {
+        let origin = vec![0.0; len];
+        for magnitude in [1e20_f32, 1e-30, f32::from_bits(1), f32::MAX] {
+            let mut point = origin.clone();
+            point[0] = magnitude;
+            assert_eq!(l2_distance(&origin, &point), magnitude);
+        }
+    }
+    assert!(l2_distance(&[-f32::MAX], &[f32::MAX]).is_infinite());
+}
+
+#[test]
 fn handles_denormalized_floats() {
     // Denormalized (subnormal) floats are very small numbers near zero
     // that lose precision. They appear in scaled-down embeddings.

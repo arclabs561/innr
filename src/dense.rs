@@ -432,7 +432,13 @@ pub fn matryoshka_cosine(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
 #[inline]
 #[must_use]
 pub fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
-    l2_distance_squared(a, b).sqrt()
+    let squared = l2_distance_squared(a, b);
+    if squared.is_normal() {
+        squared.sqrt()
+    } else {
+        // The distance can fit in f32 even when its square does not.
+        norm_wide(a.iter().zip(b).map(|(&x, &y)| x - y)) as f32
+    }
 }
 
 /// L1 (Manhattan) distance: `Σ|a[i] - b[i]|`.

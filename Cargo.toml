@@ -62,7 +62,7 @@ rand = "0.9"
 hnsw_rs = "0.3"
 # Consumer-shape benches: wass's ndarray fallback, and shared generators plus
 # fallbacks that need unsafe intrinsics (innr forbids unsafe in its targets).
-ndarray = "0.16"
+ndarray = "0.17"
 innr-bench-support = { path = "benches/support" }
 
 [[example]]
